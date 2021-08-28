@@ -11,7 +11,7 @@ for file in folder:
     print(count, ":", file)
     count+=1
 #choice = input("Select which sample you wish to try to read:\n")
-choice = "5" # we out here hard coding for now
+choice = "7" # we out here hard coding for now
 image_folder = folder[(int)(choice)-1]
 scan_folders = os.listdir(os.path.join(root, image_folder))
 
