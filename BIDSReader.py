@@ -16,3 +16,7 @@ def getDict(root):
         data = json.load(f)
         f.close()
         return data
+        
+dat = getDict("C:\\Users\\richa\\Documents\\Uni\\Thesis\\central.xnat.org\\OAS30001_MR_d0129_simple\\anat1")
+for key, value in dat.items():
+    print(key, " -> ", value)
