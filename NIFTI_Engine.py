@@ -12,7 +12,7 @@ print("Imported.")
 # Function: Run through an entire data folder and extract all data of a certain scan type. Graps NIFTI data and returns numpy arrays for the x-array
 # Also returns an an array alongside with the patient ID and the day of the MRI
 # Orientation currently sets the choice orientation in which 2D reference images are generates (not: the returned data is still 3D)
-def extractArrays(scantype, orientation, root="C:\\Users\\richa\\Documents\\Uni\\Thesis\\central.xnat.org"):
+def extractArrays(scantype, orientation=0, root="C:\\Users\\richa\\Documents\\Uni\\Thesis\\central.xnat.org"):
     scan_array = []
     meta_array = []
     sample_dirs = os.listdir(root)
@@ -43,7 +43,8 @@ def extractArrays(scantype, orientation, root="C:\\Users\\richa\\Documents\\Uni\
             else: print("No NIFTI file found. This should not occur if the dataset is half-decent.")
         else:
             print("Warning:", sample, "does not possess data of type", scantype)
-    print("Returned array has size", len(scan_array))
+    #print("Returned array has size", len(scan_array))
     return scan_array, meta_array
-scans, meta = extractArrays('anat3', 0) #Orientation 0 to not display anything
-print(meta)
+
+#scans, meta = extractArrays('anat3', 0) #Orientation 0 to not display anything
+#print(meta)
