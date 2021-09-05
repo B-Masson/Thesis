@@ -7,6 +7,7 @@ import random
 from sklearn.model_selection import train_test_split
 import tensorflow as tf
 from scipy import ndimage
+#from keras.utils import to_categorical
 #import h5py
 #import hickle
 
@@ -41,6 +42,10 @@ for scan in scan_meta:
     y_arr.append(scan_cdr)
 print('*'*10)
 print(y_arr)
+classNo = len(np.unique(y_arr))
+print("There are", classNo, "unique classes.")
+print('*'*10)
+y_arr = tf.keras.utils.to_categorical(y_arr)
 
 # Split data
 x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr, stratify=y_arr) #Defaulting to 75 train, 25 val. Also shuffle=true and stratifytrue.
@@ -48,12 +53,9 @@ print("Data successfully split. Train [", len(x_train), "] | Validate [", len(x_
 
 # Save processed data so we can actually split up all this effort
 #f = h5py.File("train_data.hdf5", "w")
-
-with open('training', 'wb') as f:
-    np.save(f, [x_train, y_train])
-    
-with open('validation', 'wb') as f:
-    np.save(f, [x_val, y_val])
+np.savez_compressed('training', a=x_train, b=y_train)
+np.savez_compressed('validation', a=x_val, b=y_val)
+print("Data saved.")
 '''
 # Data augmentation functions
 @tf.function
