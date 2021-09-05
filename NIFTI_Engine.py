@@ -7,6 +7,7 @@ import os.path as op
 from skimage.io import imread
 import nibabel as nib
 import matplotlib.pyplot as plt
+from scipy import ndimage
 print("Imported.")
 
 # Function: Run through an entire data folder and extract all data of a certain scan type. Graps NIFTI data and returns numpy arrays for the x-array
@@ -24,7 +25,8 @@ def extractArrays(scantype, orientation=0, root="C:\\Users\\richa\\Documents\\Un
                 image_root = op.join(root_niftis, 'NIFTI')
                 image_file = os.listdir(image_root)[0]
                 image_dir = op.join(image_root, image_file)
-                image_data=nib.load(image_dir).get_fdata()
+                image_data_raw = nib.load(image_dir).get_fdata()
+                image_data = organiseImage(image_data_raw)
                 scan_array.append(image_data)
                 meta_segments = sample.split("_")
                 meta_array.append({'ID': meta_segments[0], 'day': int(meta_segments[2][1:])})
@@ -46,5 +48,33 @@ def extractArrays(scantype, orientation=0, root="C:\\Users\\richa\\Documents\\Un
     #print("Returned array has size", len(scan_array))
     return scan_array, meta_array
 
-scans, meta = extractArrays('anat3', 0) #Orientation 0 to not display anything
-print(meta)
+# Remove unecessary ranges from the NIFTI data, then normalise to range from 0 to 1
+def normalize(image_data, min=-1000, max=400):
+    image_data[image_data < min] = min
+    image_data[image_data > max] = max
+    image_data = (image_data - min) / (max - min)
+    image_data = image_data.astype("float32")
+    return image_data
+
+# Resize the data to some uniform amount so it actually fits into a training model
+def resize(image_data, w=128, h=128, d=64):
+    # Get current dimensions
+    width = image_data.shape[0]
+    height = image_data.shape[1]
+    depth = image_data.shape[-1]
+    # Compute all the factors that we need to scale the dimensions by
+    width_factor = 1/(width/w)
+    height_factor = 1/(height/h)
+    depth_factor = 1/(depth/d)
+    # Resize using factors
+    image_data = ndimage.zoom(image_data, (width_factor, height_factor, depth_factor), order=1)
+    return image_data
+
+def organiseImage(data):
+    data = normalize(data)
+    data = resize(data)
+    return data
+
+if __name__ == "__main__":
+    scans, meta = extractArrays('anat3', 0) #Orientation 0 to not display anything
+    print(meta)

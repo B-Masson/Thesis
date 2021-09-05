@@ -2,3 +2,5 @@ __pycache__
 3DPractice
 *.png
 saved_model
+training
+validation
