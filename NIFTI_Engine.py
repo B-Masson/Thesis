@@ -46,5 +46,5 @@ def extractArrays(scantype, orientation=0, root="C:\\Users\\richa\\Documents\\Un
     #print("Returned array has size", len(scan_array))
     return scan_array, meta_array
 
-#scans, meta = extractArrays('anat3', 0) #Orientation 0 to not display anything
-#print(meta)
+scans, meta = extractArrays('anat3', 0) #Orientation 0 to not display anything
+print(meta)
