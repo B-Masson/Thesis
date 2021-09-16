@@ -8,7 +8,6 @@ from skimage.io import imread
 import nibabel as nib
 import matplotlib.pyplot as plt
 from scipy import ndimage
-print("Imported.")
 
 # Function: Run through an entire data folder and extract all data of a certain scan type. Graps NIFTI data and returns numpy arrays for the x-array
 # Also returns an an array alongside with the patient ID and the day of the MRI
@@ -76,5 +75,6 @@ def organiseImage(data):
     return data
 
 if __name__ == "__main__":
+    print("Imported.")
     scans, meta = extractArrays('anat3', 0) #Orientation 0 to not display anything
     print(meta)
