@@ -8,7 +8,6 @@ import time
 def loadCDR(data_loc = "Basic CDR Info.csv", size = 0): #File to be read in goes here
     root = "C:\\Users\\richa\\Documents\\Uni\\Thesis\\Label Data"
     path = os.path.join(root, data_loc)
-    print("Reading in data...")
     # Create a dataframe and use that to populate a dictionary
     tic = time.perf_counter()
     df = pd.read_csv(path)
@@ -36,6 +35,7 @@ def loadCDR(data_loc = "Basic CDR Info.csv", size = 0): #File to be read in goes
         '''
     toc = round((time.perf_counter()-tic),2)
     #print("Total time:", toc, "seconds.") # For testing
+    print("Meta data set up.")
     return scan_dict, patient_CDR_range
 
 #scan, pat = loadCDR()

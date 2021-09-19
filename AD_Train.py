@@ -7,7 +7,7 @@ from matplotlib import pyplot as plt
 import random
 
 # Model architecture go here
-def gen_model(width=128, height=128, depth=64): # Make sure defaults are equal to image resizing defaults
+def gen_model(width=128, height=128, depth=64, classes=3): # Make sure defaults are equal to image resizing defaults
     inputs = keras.Input((width, height, depth, 1)) # Added extra dimension in preprocessing to accomodate that 4th dim
 
     # Contruction seems to be pretty much the same as if this was 2D. Kernal should default to 3,3,3
@@ -31,7 +31,7 @@ def gen_model(width=128, height=128, depth=64): # Make sure defaults are equal t
     x = layers.Dense(units=512, activation="relu")(x) # Implement a simple dense layer with double units
     x = layers.Dropout(0.3)(x) # 30% dropout rate for now (this differs from original paper which used 60% so might get changed later)
 
-    outputs = layers.Dense(units=1, activation="softmax")(x) # Units = no of classes. Also softmax because classes are mutually exclusive
+    outputs = layers.Dense(units=classes, activation="softmax")(x) # Units = no of classes. Also softmax because classes are mutually exclusive
 
     # Define the model.
     model = keras.Model(inputs, outputs, name="3DCNN")
@@ -78,6 +78,7 @@ x_train = train['a']
 y_train = train['b']
 x_val = val['a']
 y_val = val['b']
+classNo = len(np.unique(y_train)) # Number of classes (can be hardcoded to 3 for full training but this is more versatile)
 
 # Augment data, as well expand dimensions to make the training model accept it (by adding a 4th dimension)
 train_loader = tf.data.Dataset.from_tensor_slices((x_train, y_train))
@@ -100,7 +101,7 @@ validation_set = (
 print("Data is ready for training.")
 
 # Build model.
-model = gen_model(width=128, height=128, depth=64)
+model = gen_model(width=128, height=128, depth=64, classes=classNo)
 model.summary()
 optim = keras.optimizers.Adam(learning_rate=0.001) # LR chosen based on principle but double-check this later
 # Note: These things will have to change if this is changed into a regression model

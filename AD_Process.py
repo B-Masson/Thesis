@@ -7,14 +7,15 @@ import random
 from sklearn.model_selection import train_test_split
 import tensorflow as tf
 from scipy import ndimage
+
 #from keras.utils import to_categorical
 #import h5py
 #import hickle
 
 # Fetch all our seperated data
 print("Starting up")
-x_arr, scan_meta = ne.extractArrays('anat3', root="C:\\Users\\richa\\Documents\\Uni\\Thesis\\Code_Small")
-clinic_sessions, cdr_meta = lr.loadCDR(size=50)
+x_arr, scan_meta = ne.extractArrays('all', root="C:\\Users\\richa\\Documents\\Uni\\Thesis\\Code_Small")
+clinic_sessions, cdr_meta = lr.loadCDR()
 print('*'*10)
 
 # Ascertain lengths and shapes
@@ -31,15 +32,18 @@ for scan in scan_meta:
     print("Patient", scan['ID'], "scan on day:", scan_day)
     scan_cdr = -1
     cdr_day = -1
-    min = 1000
-    for x in cdr_meta[scan['ID']]:
-        diff = abs(scan_day-x[0])
-        if diff < min:
-            min = diff
-            scan_cdr = x[1]
-            cdr_day = x[0]
-    print("Assigned cdr", scan_cdr, "- from day", cdr_day)
-    y_arr.append(scan_cdr)
+    min = 100000
+    try:
+        for x in cdr_meta[scan['ID']]:
+            diff = abs(scan_day-x[0])
+            if diff < min:
+                min = diff
+                scan_cdr = x[1]
+                cdr_day = x[0]
+        print("Assigned cdr", scan_cdr, "- from day", cdr_day)
+        y_arr.append(scan_cdr*2) #0 = 0, 0.5 = 1, 1 = 2
+    except KeyError as k:
+        print(k, "| Seems like the entry for that patient doesn't exist.")
 print('*'*10)
 print(y_arr)
 classNo = len(np.unique(y_arr))
@@ -48,8 +52,10 @@ print('*'*10)
 y_arr = tf.keras.utils.to_categorical(y_arr)
 
 # Split data
-x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr, stratify=y_arr) #Defaulting to 75 train, 25 val/test. Also shuffle=true and stratifytrue.
-x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, test_size=0.2) # 80/20 val/test, therefore 75/20/5 train/val/test.
+#x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr, stratify=y_arr) # Defaulting to 75 train, 25 val/test. Also shuffle=true and stratifytrue.
+#x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, test_size=0.2) # 80/20 val/test, therefore 75/20/5 train/val/test.
+x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr) # TEMPORARY: NO STRATIFY. ONLY USING WHILE THE SET IS TOO SMALL FOR STRATIFICATION
+x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, test_size=0.2)
 print("Data successfully split. Train [", len(x_train), "] | Validate [", len(x_val), "] | Test [", len(x_test), "]", sep='')
 
 # Save processed data so we can actually split up all this effort

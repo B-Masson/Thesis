@@ -8,7 +8,9 @@ from skimage.io import imread
 import nibabel as nib
 import matplotlib.pyplot as plt
 from scipy import ndimage
-print("Imported.")
+from tqdm import tqdm
+from time import sleep
+print("Imported engine packages.")
 
 # Function: Run through an entire data folder and extract all data of a certain scan type. Graps NIFTI data and returns numpy arrays for the x-array
 # Also returns an an array alongside with the patient ID and the day of the MRI
@@ -17,8 +19,34 @@ def extractArrays(scantype, orientation=0, root="C:\\Users\\richa\\Documents\\Un
     scan_array = []
     meta_array = []
     sample_dirs = os.listdir(root)
-    for sample in sample_dirs:
-        if scantype in os.listdir(op.join(root, sample)):
+    print("Loading in scan data...")
+    for sample in tqdm(sample_dirs):
+        sleep(0.25)
+        if scantype == "all":
+            for scan in os.listdir(op.join(root, sample)):
+                if ("anat" in scan) or ("func" in scan): #Mostly to sift out BIDS folders/random unwanted stuff
+                    image_root = op.join(root, sample, scan, 'NIFTI')
+                    #print("Reading file at", image_root, ": ", os.listdir(image_root)[0])
+                    image_file = os.listdir(image_root)[0]
+                    image_dir = op.join(image_root, image_file)
+                    image_data_raw = nib.load(image_dir).get_fdata()
+                    image_data = organiseImage(image_data_raw)
+                    scan_array.append(image_data)
+                    meta_segments = sample.split("_")
+                    meta_array.append({'ID': meta_segments[0], 'day': int(meta_segments[2][1:])})
+                    try:
+                        if orientation == 1:
+                            plt.imshow(image_data[50,:,:], cmap='bone')
+                            plt.show()
+                        elif orientation == 2:
+                            plt.imshow(image_data[:,50,:], cmap='bone')
+                            plt.show()
+                        elif orientation == 3:
+                            plt.imshow(image_data[:,:,30], cmap='bone')
+                            plt.show()
+                    except TypeError as e:
+                        print("Cannot display example slices:", e)
+        elif scantype in os.listdir(op.join(root, sample)): # This needs to be cleaned up and incorporated into the above at some point, to reduce redundant code
             root_niftis = op.join(root, sample, scantype)
             check_niftis = os.listdir(root_niftis)
             if "NIFTI" in check_niftis:
@@ -75,6 +103,7 @@ def organiseImage(data):
     data = resize(data)
     return data
 
-if __name__ == "__main__":
-    scans, meta = extractArrays('anat3', 0) #Orientation 0 to not display anything
-    print(meta)
+#if __name__ == "__main__":
+    #Why does this trigger even when its not main?
+    #scans, meta = extractArrays('anat3', 0) #Orientation 0 to not display anything
+    #print(meta)
