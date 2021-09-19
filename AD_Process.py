@@ -13,7 +13,7 @@ from scipy import ndimage
 
 # Fetch all our seperated data
 print("Starting up")
-x_arr, scan_meta = ne.extractArrays('anat3')
+x_arr, scan_meta = ne.extractArrays('anat3', root="C:\\Users\\richa\\Documents\\Uni\\Thesis\\Code_Small")
 clinic_sessions, cdr_meta = lr.loadCDR(size=50)
 print('*'*10)
 
@@ -48,14 +48,17 @@ print('*'*10)
 y_arr = tf.keras.utils.to_categorical(y_arr)
 
 # Split data
-x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr, stratify=y_arr) #Defaulting to 75 train, 25 val. Also shuffle=true and stratifytrue.
-print("Data successfully split. Train [", len(x_train), "] | Validate [", len(x_val), "]", sep='')
+x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr, stratify=y_arr) #Defaulting to 75 train, 25 val/test. Also shuffle=true and stratifytrue.
+x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, test_size=0.2) # 80/20 val/test, therefore 75/20/5 train/val/test.
+print("Data successfully split. Train [", len(x_train), "] | Validate [", len(x_val), "] | Test [", len(x_test), "]", sep='')
 
 # Save processed data so we can actually split up all this effort
 #f = h5py.File("train_data.hdf5", "w")
 np.savez_compressed('training', a=x_train, b=y_train)
 np.savez_compressed('validation', a=x_val, b=y_val)
+np.savez_compressed('testing', a=x_test, b=y_test)
 print("Data saved.")
+
 '''
 # Data augmentation functions
 @tf.function

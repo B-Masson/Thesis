@@ -40,8 +40,7 @@ def gen_model(width=128, height=128, depth=64): # Make sure defaults are equal t
 # Data augmentation functions
 @tf.function
 def rotate(image):
-    """Rotate the image by a few degrees"""
-    def scipy_rotate(image):
+    def scipy_rotate(image): # Rotate by random angular amount
         # define some rotation angles
         angles = [-20, -10, -5, 5, 10, 20]
         # pick angles at random
@@ -56,15 +55,14 @@ def rotate(image):
     return augmented_image
 
 
-def train_preprocessing(image, label):
-    """Process training data by rotating and adding a channel."""
+def train_preprocessing(image, label): # Only use for training, as it includes rotation augmentation
     # Rotate image
     image = rotate(image)
     image = tf.expand_dims(image, axis=3)
     return image, label
 
 
-def validation_preprocessing(image, label):
+def validation_preprocessing(image, label): # Can be used for val or test data (just ensures the dimensions are ok for the model)
     """Process validation data by only adding a channel."""
     image = tf.expand_dims(image, axis=3)
     return image, label
