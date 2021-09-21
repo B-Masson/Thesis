@@ -6,7 +6,8 @@ import time
 
 # Define file path
 def loadCDR(data_loc = "Basic CDR Info.csv", size = 0): #File to be read in goes here
-    root = "C:\\Users\\richa\\Documents\\Uni\\Thesis\\Label Data"
+    root = "C:\\Users\\richa\\Documents\\Uni\\Thesis\\Label Data" # windows
+    root = "Label Data" # Linux
     path = os.path.join(root, data_loc)
     # Create a dataframe and use that to populate a dictionary
     tic = time.perf_counter()

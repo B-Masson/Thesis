@@ -14,7 +14,8 @@ from scipy import ndimage
 
 # Fetch all our seperated data
 print("Starting up")
-x_arr, scan_meta = ne.extractArrays('all', root="C:\\Users\\richa\\Documents\\Uni\\Thesis\\Code_Small")
+#x_arr, scan_meta = ne.extractArrays('all', root="C:\\Users\\richa\\Documents\\Uni\\Thesis\\Code_Small") # Windows world
+x_arr, scan_meta = ne.extractArrays('all', root="/home/rmasson/Documents") # Linux world
 clinic_sessions, cdr_meta = lr.loadCDR()
 print('*'*10)
 

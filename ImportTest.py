@@ -11,6 +11,8 @@ from scipy import ndimage
 from tensorflow import keras
 from keras import layers
 from matplotlib import pyplot as plt
+from tqdm import tqdm
+from sklearn.utils import shuffle
 import random
 
 print("All imports working.")
