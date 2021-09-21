@@ -41,7 +41,7 @@ for scan in scan_meta:
                 min = diff
                 scan_cdr = x[1]
                 cdr_day = x[0]
-        print("Assigned cdr", scan_cdr, "- from day", cdr_day)
+        #print("Assigned cdr", scan_cdr, "- from day", cdr_day)
         y_arr.append(scan_cdr*2) #0 = 0, 0.5 = 1, 1 = 2
     except KeyError as k:
         print(k, "| Seems like the entry for that patient doesn't exist.")
