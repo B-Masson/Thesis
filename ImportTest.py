@@ -1,18 +1,22 @@
-import LabelReader as lr
-import NIFTI_Engine as ne
 import numpy as np
-import random
+print("Numpy imported.")
 from sklearn.model_selection import train_test_split
-import tensorflow as tf
+from sklearn.utils import shuffle
 from scipy import ndimage
-import tensorflow as tf
-import numpy as np
 from scipy import ndimage
+print("Sklearn and scipy imported.")
+from matplotlib import pyplot as plt
+print("Matplotlib imported.")
+from tqdm import tqdm
+print("Tqdm imported.")
+import LabelReader as lr
+print("LabelReader stuff imported.")
+import tensorflow as tf
+print("Tensorflow imported")
 from tensorflow import keras
 from keras import layers
-from matplotlib import pyplot as plt
-from tqdm import tqdm
-from sklearn.utils import shuffle
-import random
+print("Keras stuff imported.")
+import NIFTI_Engine as ne
+print("NIFTI Engine stuff imported.")
 
 print("All imports working.")
