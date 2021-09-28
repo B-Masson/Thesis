@@ -8,13 +8,14 @@ from sklearn.model_selection import train_test_split
 import tensorflow as tf
 from scipy import ndimage
 from tensorflow import keras
-from keras import layers
+from tensorflow.keras import layers
 from matplotlib import pyplot as plt
 import random
 
 print("Start")
 # Fetch all our seperated data
-x_arr, scan_meta = ne.extractArrays('all', root="/home/rmasson/Documents/Data") # Linux world
+#x_arr, scan_meta = ne.extractArrays('all', root="/home/rmasson/Documents/Data") # Linux workstation world
+x_arr, scan_meta = ne.extractArrays('all', root="/scratch/mssric004/Data") # HPC world
 clinic_sessions, cdr_meta = lr.loadCDR()
 
 # Generate some cdr y labels for each scan
@@ -43,6 +44,7 @@ y_arr = tf.keras.utils.to_categorical(y_arr)
 #x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, test_size=0.2) # 80/20 val/test, therefore 75/20/5 train/val/test.
 x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr) # TEMPORARY: NO STRATIFY. ONLY USING WHILE THE SET IS TOO SMALL FOR STRATIFICATION
 x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, test_size=0.2)
+np.savez_compressed('testing', a=x_test, b=y_test)
 print("Data has been preprocessed. Moving on to model...")
 
 # Model architecture go here
@@ -133,7 +135,7 @@ optim = keras.optimizers.Adam(learning_rate=0.001) # LR chosen based on principl
 model.compile(optimizer=optim, loss='binary_crossentropy', metrics=['accuracy']) # Binary cross is usual for single-class 0-1 stuff. Accuracy is straightfoward
 
 # Model hyperparameters
-epochs = 5 # Small for testing purposes
+epochs = 1 # Small for testing purposes
 # CHECKPOINT CODE GO HERE
 # POTENTIAL EARLY STOPPING GO HERE
 
@@ -142,4 +144,15 @@ print("Fitting model...")
 history = model.fit(train_set, validation_data=validation_set, batch_size=1, epochs=epochs, shuffle=True, verbose=1)
 modelname = "ADModel"
 model.save(modelname)
+print(history.history)
 print("Complete. Parameters saved to", modelname)
+'''
+from sklearn.metrics import classification_report
+
+# Generate a classification matrix
+print("Generating classificaiton report...\n")
+Y_test = np.argmax(y_test, axis=1)
+y_pred = model.predict_classes(x_test)
+print(classification_report(Y_test, y_pred))
+print("Done.")
+'''
