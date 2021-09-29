@@ -33,17 +33,21 @@ for scan in scan_meta:
                 min = diff
                 scan_cdr = x[1]
                 cdr_day = x[0]
-        y_arr.append(scan_cdr*2) #0 = 0, 0.5 = 1, 1 = 2
+        scaled_val = int(scan_cdr*2) #0 = 0, 0.5 = 1, 1 = 2 (elimate decimals)
+        if scaled_val > 2:
+            scaled_val = 2 # Cap out at 2 since we can classify anything at 1 or above as "severe"
+        y_arr.append(scaled_val) 
     except KeyError as k:
         print(k, "| Seems like the entry for that patient doesn't exist.")
 classNo = len(np.unique(y_arr))
+print("There are", classNo, "unique classes. ->", np.unique(y_arr))
 y_arr = tf.keras.utils.to_categorical(y_arr)
 
 # Split data
-#x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr, stratify=y_arr) # Defaulting to 75 train, 25 val/test. Also shuffle=true and stratifytrue.
-#x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, test_size=0.2) # 80/20 val/test, therefore 75/20/5 train/val/test.
-x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr) # TEMPORARY: NO STRATIFY. ONLY USING WHILE THE SET IS TOO SMALL FOR STRATIFICATION
-x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, test_size=0.2)
+x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr, stratify=y_arr) # Defaulting to 75 train, 25 val/test. Also shuffle=true and stratifytrue.
+x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, test_size=0.2) # 80/20 val/test, therefore 75/20/5 train/val/test.
+#x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr) # TEMPORARY: NO STRATIFY. ONLY USING WHILE THE SET IS TOO SMALL FOR STRATIFICATION
+#x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, test_size=0.2)
 np.savez_compressed('testing', a=x_test, b=y_test)
 print("Data has been preprocessed. Moving on to model...")
 
@@ -111,7 +115,7 @@ def validation_preprocessing(image, label): # Can be used for val or test data (
 # Augment data, as well expand dimensions to make the training model accept it (by adding a 4th dimension)
 train_loader = tf.data.Dataset.from_tensor_slices((x_train, y_train))
 validation_loader = tf.data.Dataset.from_tensor_slices((x_val, y_val))
-batch_size = 1
+batch_size = 128
 # Augment the on the fly during training.
 train_set = (
     train_loader.shuffle(len(x_train))
@@ -132,27 +136,27 @@ model = gen_model(width=128, height=128, depth=64, classes=classNo)
 model.summary()
 optim = keras.optimizers.Adam(learning_rate=0.001) # LR chosen based on principle but double-check this later
 # Note: These things will have to change if this is changed into a regression model
-model.compile(optimizer=optim, loss='binary_crossentropy', metrics=['accuracy']) # Binary cross is usual for single-class 0-1 stuff. Accuracy is straightfoward
+model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accuracy']) # Categorical since there are a few options. Accuracy is straightfoward
 
 # Model hyperparameters
-epochs = 1 # Small for testing purposes
+epochs = 20 # Small for testing purposes
 # CHECKPOINT CODE GO HERE
 # POTENTIAL EARLY STOPPING GO HERE
 
 # Run the model
 print("Fitting model...")
-history = model.fit(train_set, validation_data=validation_set, batch_size=1, epochs=epochs, shuffle=True, verbose=1)
+history = model.fit(train_set, validation_data=validation_set, batch_size=128, epochs=epochs, shuffle=True, verbose=1)
 modelname = "ADModel"
 model.save(modelname)
 print(history.history)
 print("Complete. Parameters saved to", modelname)
-'''
+
 from sklearn.metrics import classification_report
 
 # Generate a classification matrix
 print("Generating classificaiton report...\n")
 Y_test = np.argmax(y_test, axis=1)
-y_pred = model.predict_classes(x_test)
+y_pred = model.predict(np.expand_dims(x_test, axis=-1))
+y_pred = np.argmax(y_pred, axis=1)
 print(classification_report(Y_test, y_pred))
 print("Done.")
-'''
