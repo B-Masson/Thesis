@@ -8,3 +8,4 @@ tmp
 *.npz
 ADModel
 Label Data
+AD_GenerateModel_TestVersion.py
