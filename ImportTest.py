@@ -11,12 +11,12 @@ from tqdm import tqdm
 print("Tqdm imported.")
 import LabelReader as lr
 print("LabelReader stuff imported.")
+import NIFTI_Engine as ne
+print("NIFTI Engine stuff imported (Nibabel).")
 import tensorflow as tf
 print("Tensorflow imported")
 from tensorflow import keras
-from keras import layers
+from tensorflow.keras import layers
 print("Keras stuff imported.")
-import NIFTI_Engine as ne
-print("NIFTI Engine stuff imported.")
 
 print("All imports working.")

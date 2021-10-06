@@ -6,6 +6,7 @@ import numpy as np
 import random
 from sklearn.model_selection import train_test_split
 import tensorflow as tf
+print(tf.version.VERSION)
 from scipy import ndimage
 from tensorflow import keras
 from tensorflow.keras import layers
@@ -13,9 +14,14 @@ from matplotlib import pyplot as plt
 import random
 
 print("Start")
+# Attempt to better allocate memory.
+gpus = tf.config.experimental.list_physical_devices('GPU')
+for gpu in gpus:
+  tf.config.experimental.set_memory_growth(gpu, True)
+
 # Fetch all our seperated data
 #x_arr, scan_meta = ne.extractArrays('all', root="/home/rmasson/Documents/Data") # Linux workstation world
-x_arr, scan_meta = ne.extractArrays('all', root="/scratch/mssric004/Data") # HPC world
+x_arr, scan_meta = ne.extractArrays('all', root="/scratch/mssric004/Data_Small") # HPC world
 clinic_sessions, cdr_meta = lr.loadCDR()
 
 # Generate some cdr y labels for each scan
@@ -139,13 +145,14 @@ optim = keras.optimizers.Adam(learning_rate=0.001) # LR chosen based on principl
 model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accuracy']) # Categorical since there are a few options. Accuracy is straightfoward
 
 # Model hyperparameters
-epochs = 20 # Small for testing purposes
+epochs = 5 # Small for testing purposes
+batches = 16 # Going to need to fiddle with this over time (balance time save vs. running out of memory)
 # CHECKPOINT CODE GO HERE
 # POTENTIAL EARLY STOPPING GO HERE
 
 # Run the model
 print("Fitting model...")
-history = model.fit(train_set, validation_data=validation_set, batch_size=128, epochs=epochs, shuffle=True, verbose=1)
+history = model.fit(train_set, validation_data=validation_set, batch_size=batches, epochs=epochs, shuffle=True, verbose=1)
 modelname = "ADModel"
 model.save(modelname)
 print(history.history)
