@@ -10,9 +10,10 @@ print(tf.version.VERSION)
 from scipy import ndimage
 from tensorflow import keras
 from tensorflow.keras import layers
-from tensorflow.python.keras.callbacks import EarlyStopping, ModelCheckpoint
+from tensorflow.python.keras.callbacks import EarlyStopping, ModelCheckpoint, TensorBoard
 from matplotlib import pyplot as plt
 import random
+import datetime
 
 print("Start")
 # Attempt to better allocate memory.
@@ -152,10 +153,12 @@ model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accura
 # Checkpointing & Early Stopping
 es = EarlyStopping(monitor='val_loss', patience=1, restore_best_weights=True)
 mc = ModelCheckpoint('weight_history.h5', monitor='val_accuracy', mode='max', verbose=1, save_best_only=False)
+log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+tb = TensorBoard(log_dir=log_dir, histogram_freq=1)
 
 # Run the model
 print("Fitting model...")
-history = model.fit(train_set, validation_data=validation_set, batch_size=batches, epochs=epochs, shuffle=True, verbose=1, callbacks=[es, mc])
+history = model.fit(train_set, validation_data=validation_set, batch_size=batches, epochs=epochs, shuffle=True, verbose=1, callbacks=[es, mc, tb])
 modelname = "ADModel"
 model.save(modelname)
 print(history.history)
