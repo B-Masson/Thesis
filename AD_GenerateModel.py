@@ -55,7 +55,7 @@ y_arr = tf.keras.utils.to_categorical(y_arr)
 x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr, stratify=y_arr) # Defaulting to 75 train, 25 val/test. Also shuffle=true and stratifytrue.
 x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, test_size=0.2) # 80/20 val/test, therefore 75/20/5 train/val/test.
 #x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr) # TEMPORARY: NO STRATIFY. ONLY USING WHILE THE SET IS TOO SMALL FOR STRATIFICATION
-#x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, test_size=0.2)
+#x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, test_size=0.2) # ALSO TEMPORARY NO STRATIFY LINE
 np.savez_compressed('testing', a=x_test, b=y_test)
 print("Data has been preprocessed. Moving on to model...")
 
@@ -148,12 +148,12 @@ model = gen_model(width=128, height=128, depth=64, classes=classNo)
 model.summary()
 optim = keras.optimizers.Adam(learning_rate=0.001) # LR chosen based on principle but double-check this later
 # Note: These things will have to change if this is changed into a regression model
-model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accuracy']) # Categorical since there are a few options. Accuracy is straightfoward
+model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accuracy']) # Categorical loss since there are a few options.
 
 # Checkpointing & Early Stopping
 es = EarlyStopping(monitor='val_loss', patience=1, restore_best_weights=True)
 mc = ModelCheckpoint('weight_history.h5', monitor='val_accuracy', mode='max', verbose=1, save_best_only=False)
-log_dir = "logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+log_dir = "/scratch/mssric004/logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 tb = TensorBoard(log_dir=log_dir, histogram_freq=1)
 
 # Run the model
