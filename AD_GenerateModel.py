@@ -10,6 +10,7 @@ print(tf.version.VERSION)
 from scipy import ndimage
 from tensorflow import keras
 from tensorflow.keras import layers
+from tensorflow.python.keras.callbacks import EarlyStopping, ModelCheckpoint
 from matplotlib import pyplot as plt
 import random
 
@@ -88,6 +89,10 @@ def gen_model(width=128, height=128, depth=64, classes=3): # Make sure defaults 
     model = keras.Model(inputs, outputs, name="3DCNN")
     return model
 
+# Model hyperparameters
+epochs = 10 # Small for testing purposes
+batches = 8 # Going to need to fiddle with this over time (balance time save vs. running out of memory)
+
 # Data augmentation functions
 @tf.function
 def rotate(image):
@@ -121,7 +126,7 @@ def validation_preprocessing(image, label): # Can be used for val or test data (
 # Augment data, as well expand dimensions to make the training model accept it (by adding a 4th dimension)
 train_loader = tf.data.Dataset.from_tensor_slices((x_train, y_train))
 validation_loader = tf.data.Dataset.from_tensor_slices((x_val, y_val))
-batch_size = 128
+batch_size = batches
 # Augment the on the fly during training.
 train_set = (
     train_loader.shuffle(len(x_train))
@@ -144,24 +149,23 @@ optim = keras.optimizers.Adam(learning_rate=0.001) # LR chosen based on principl
 # Note: These things will have to change if this is changed into a regression model
 model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accuracy']) # Categorical since there are a few options. Accuracy is straightfoward
 
-# Model hyperparameters
-epochs = 5 # Small for testing purposes
-batches = 16 # Going to need to fiddle with this over time (balance time save vs. running out of memory)
-# CHECKPOINT CODE GO HERE
-# POTENTIAL EARLY STOPPING GO HERE
+# Checkpointing & Early Stopping
+es = EarlyStopping(monitor='val_loss', patience=1, restore_best_weights=True)
+mc = ModelCheckpoint('weight_history.h5', monitor='val_accuracy', mode='max', verbose=1, save_best_only=False)
 
 # Run the model
 print("Fitting model...")
-history = model.fit(train_set, validation_data=validation_set, batch_size=batches, epochs=epochs, shuffle=True, verbose=1)
+history = model.fit(train_set, validation_data=validation_set, batch_size=batches, epochs=epochs, shuffle=True, verbose=1, callbacks=[es, mc])
 modelname = "ADModel"
 model.save(modelname)
 print(history.history)
-print("Complete. Parameters saved to", modelname)
+actual_epochs = len(history.history['val_loss'])
+print("Complete. Ran for ", actual_epochs, "/", epochs, " epochs.\nParameters saved to", modelname)
 
 from sklearn.metrics import classification_report
 
 # Generate a classification matrix
-print("Generating classificaiton report...\n")
+print("Generating classification report...\n")
 Y_test = np.argmax(y_test, axis=1)
 y_pred = model.predict(np.expand_dims(x_test, axis=-1))
 y_pred = np.argmax(y_pred, axis=1)
