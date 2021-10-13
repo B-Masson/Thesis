@@ -15,7 +15,7 @@ print("Imported engine packages.")
 # Function: Run through an entire data folder and extract all data of a certain scan type. Graps NIFTI data and returns numpy arrays for the x-array
 # Also returns an an array alongside with the patient ID and the day of the MRI
 # Orientation currently sets the choice orientation in which 2D reference images are generates (not: the returned data is still 3D)
-def extractArrays(scantype, orientation=0, root="C:\\Users\\richa\\Documents\\Uni\\Thesis\\central.xnat.org"):
+def extractArrays(scantype, w, h, d, orientation=0, root="C:\\Users\\richa\\Documents\\Uni\\Thesis\\central.xnat.org"):
     scan_array = []
     meta_array = []
     sample_dirs = os.listdir(root)
@@ -30,7 +30,7 @@ def extractArrays(scantype, orientation=0, root="C:\\Users\\richa\\Documents\\Un
                     image_file = os.listdir(image_root)[0]
                     image_dir = op.join(image_root, image_file)
                     image_data_raw = nib.load(image_dir).get_fdata()
-                    image_data = organiseImage(image_data_raw)
+                    image_data = organiseImage(image_data_raw, w, h, d)
                     scan_array.append(image_data)
                     meta_segments = sample.split("_")
                     meta_array.append({'ID': meta_segments[0], 'day': int(meta_segments[2][1:])})
@@ -54,7 +54,7 @@ def extractArrays(scantype, orientation=0, root="C:\\Users\\richa\\Documents\\Un
                 image_file = os.listdir(image_root)[0]
                 image_dir = op.join(image_root, image_file)
                 image_data_raw = nib.load(image_dir).get_fdata()
-                image_data = organiseImage(image_data_raw)
+                image_data = organiseImage(image_data_raw, w, h, d)
                 scan_array.append(image_data)
                 meta_segments = sample.split("_")
                 meta_array.append({'ID': meta_segments[0], 'day': int(meta_segments[2][1:])})
@@ -98,9 +98,9 @@ def resize(image_data, w=128, h=128, d=64):
     image_data = ndimage.zoom(image_data, (width_factor, height_factor, depth_factor), order=1)
     return image_data
 
-def organiseImage(data):
+def organiseImage(data, w, h, d):
     data = normalize(data)
-    data = resize(data)
+    data = resize(data, w, h, d)
     return data
 
 #if __name__ == "__main__":
