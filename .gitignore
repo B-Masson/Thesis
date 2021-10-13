@@ -9,3 +9,7 @@ tmp
 ADModel
 Label Data
 AD_GenerateModel_TestVersion.py
+*.h5
+*.pb
+*.index
+variables.*
