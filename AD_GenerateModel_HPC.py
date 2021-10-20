@@ -39,7 +39,8 @@ d = 64/scale
 #x_arr, scan_meta = ne.extractArrays('all', root="/home/rmasson/Documents/Data") # Linux workstation world
 rootloc = "/scratch/mssric004/Data" # HPC world
 if testing_mode:
-    rootloc = "/scratch/mssric004/Data_Medium"
+    rootloc = "/scratch/mssric004/Data_Small"
+    print("TEST MODE ENABLED.")
 x_arr, scan_meta = ne.extractArrays('all', w, h, d, root=rootloc)
 clinic_sessions, cdr_meta = lr.loadCDR()
 
@@ -89,6 +90,7 @@ print("Data has been preprocessed. Moving on to model...")
 '''
 # Model architecture go here
 def gen_model(width=128, height=128, depth=64, classes=3): # Make sure defaults are equal to image resizing defaults
+    # Initial build version - no explicit Sequential definition
     inputs = keras.Input((width, height, depth, 1)) # Added extra dimension in preprocessing to accomodate that 4th dim
 
     # Contruction seems to be pretty much the same as if this was 2D. Kernal should default to 3,3,3
@@ -118,6 +120,37 @@ def gen_model(width=128, height=128, depth=64, classes=3): # Make sure defaults 
 
     # Define the model.
     model = keras.Model(inputs, outputs, name="3DCNN")
+
+    return model
+
+def gen_model_seq(width=128, height=128, depth=64, classes=3): # Make sure defaults are equal to image resizing defaults
+    # Sequential built
+    model = keras.Sequential()
+
+    #model.add(keras.Input((width, height, depth, 1)))
+    input_shape = (width, height, depth)
+    model.add(layers.Conv3D(filters=64, kernel_size=3, activation="relu", input_shape=input_shape))
+    model.add(layers.MaxPool3D(pool_size=2))
+    model.add(layers.BatchNormalization())
+
+    model.add(layers.Conv3D(filters=64, kernel_size=3, activation="relu"))
+    model.add(layers.MaxPool3D(pool_size=2))
+    model.add(layers.BatchNormalization())
+
+    model.add(layers.Conv3D(filters=128, kernel_size=3, activation="relu"))
+    model.add(layers.MaxPool3D(pool_size=2))
+    model.add(layers.BatchNormalization())
+
+    model.add(layers.Conv3D(filters=256, kernel_size=3, activation="relu"))
+    model.add(layers.MaxPool3D(pool_size=2))
+    model.add(layers.BatchNormalization())
+
+    model.add(layers.GlobalAveragePooling3D())
+    model.add(layers.Dense(units=512, activation="relu"))
+    model.add(layers.Dropout(0.6))
+
+    model.add(layers.Dense(units=classes, activation="softmax"))
+
     return model
 
 # Model hyperparameters
@@ -179,7 +212,9 @@ validation_set = (
 
 # Build model.
 model = gen_model(width=128, height=128, depth=64, classes=classNo)
+model2 = gen_model_seq(width=128, height=128, depth=64, classes=classNo)
 model.summary()
+model2.summary()
 optim = keras.optimizers.Adam(learning_rate=0.001) # LR chosen based on principle but double-check this later
 # Note: These things will have to change if this is changed into a regression model
 model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accuracy']) # Categorical loss since there are move than 2 classes.
@@ -193,9 +228,14 @@ mc = ModelCheckpoint(checkpointname, monitor='val_accuracy', mode='max', verbose
 log_dir = "/scratch/mssric004/logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 tb = TensorBoard(log_dir=log_dir, histogram_freq=1)
 
+# Class weighting
+# Data distribution is {0: 2625, 1: 569, 2: 194}
+# So if we want to do this in equal ratiosit would {be 0:1., 1:5., 2:13.}
+class_weight = {0: 1., 1: 5., 2: 12.}
+
 # Run the model
 print("Fitting model...")
-history = model.fit(train_set, validation_data=validation_set, batch_size=batches, epochs=epochs, shuffle=True, verbose=1, callbacks=[mc, tb])
+history = model.fit(train_set, validation_data=validation_set, batch_size=batches, epochs=epochs, shuffle=True, verbose=1, callbacks=[mc, tb], class_weight=class_weight)
 # Note: Add early stop back in at some point
 modelname = "ADModel"
 if testing_mode:
@@ -217,6 +257,4 @@ print(Y_test)
 print("Predictions are  as follows:")
 print(y_pred)
 print(classification_report(Y_test, y_pred))
-pred_raw = model.predict(np.expand_dims(x_test[0], axis=-1))
-print("Example of raw encoded prediction:", pred_raw)
 print("Done.")
