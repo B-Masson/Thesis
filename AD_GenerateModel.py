@@ -14,6 +14,7 @@ from tensorflow.python.keras.callbacks import EarlyStopping, ModelCheckpoint, Te
 from matplotlib import pyplot as plt
 import random
 import datetime
+import collections
 
 print("Start")
 # Attempt to better allocate memory.
@@ -21,9 +22,15 @@ gpus = tf.config.experimental.list_physical_devices('GPU')
 for gpu in gpus:
   tf.config.experimental.set_memory_growth(gpu, True)
 
+# Define image size (lower image resolution in order to speed up for broad testing)
+scale = 1 # Quarter the size of optimal
+w = 128/scale
+h = 128/scale
+d = 64/scale
+
 # Fetch all our seperated data
 #x_arr, scan_meta = ne.extractArrays('all', root="/home/rmasson/Documents/Data") # Linux workstation world
-x_arr, scan_meta = ne.extractArrays('all', root="/scratch/mssric004/Data_Small") # HPC world
+x_arr, scan_meta = ne.extractArrays('all', w, h, d, root="/scratch/mssric004/Data_Small") # HPC world
 clinic_sessions, cdr_meta = lr.loadCDR()
 
 # Generate some cdr y labels for each scan
@@ -52,11 +59,17 @@ print("There are", classNo, "unique classes. ->", np.unique(y_arr))
 y_arr = tf.keras.utils.to_categorical(y_arr)
 
 # Split data
-x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr, stratify=y_arr) # Defaulting to 75 train, 25 val/test. Also shuffle=true and stratifytrue.
-x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, test_size=0.2) # 80/20 val/test, therefore 75/20/5 train/val/test.
-#x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr) # TEMPORARY: NO STRATIFY. ONLY USING WHILE THE SET IS TOO SMALL FOR STRATIFICATION
-#x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, test_size=0.2) # ALSO TEMPORARY NO STRATIFY LINE
+#x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr, stratify=y_arr) # Defaulting to 75 train, 25 val/test. Also shuffle=true and stratifytrue.
+#x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, test_size=0.2) # 80/20 val/test, therefore 75/20/5 train/val/test.
+x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr) # TEMPORARY: NO STRATIFY. ONLY USING WHILE THE SET IS TOO SMALL FOR STRATIFICATION
+x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, test_size=0.2) # ALSO TEMPORARY NO STRATIFY LINE
 np.savez_compressed('testing', a=x_test, b=y_test)
+
+# Ascertain what the class breakdown is
+print("Class breakdowns:")
+print("Training:", collections.Counter(y_train))
+print("Validation:", collections.Counter(y_val))
+print("Testing:", collections.Counter(y_test))
 print("Data has been preprocessed. Moving on to model...")
 
 # Model architecture go here
@@ -91,8 +104,8 @@ def gen_model(width=128, height=128, depth=64, classes=3): # Make sure defaults 
     return model
 
 # Model hyperparameters
-epochs = 10 # Small for testing purposes
-batches = 8 # Going to need to fiddle with this over time (balance time save vs. running out of memory)
+epochs = 2 # Small for testing purposes
+batches = 4 # Going to need to fiddle with this over time (balance time save vs. running out of memory)
 
 # Data augmentation functions
 @tf.function
@@ -152,14 +165,15 @@ model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accura
 
 # Checkpointing & Early Stopping
 es = EarlyStopping(monitor='val_loss', patience=1, restore_best_weights=True)
-mc = ModelCheckpoint('weight_history.h5', monitor='val_accuracy', mode='max', verbose=1, save_best_only=False)
+mc = ModelCheckpoint('weight_history_testing.h5', monitor='val_accuracy', mode='max', verbose=1, save_best_only=False)
 log_dir = "/scratch/mssric004/logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 tb = TensorBoard(log_dir=log_dir, histogram_freq=1)
 
 # Run the model
 print("Fitting model...")
-history = model.fit(train_set, validation_data=validation_set, batch_size=batches, epochs=epochs, shuffle=True, verbose=1, callbacks=[es, mc, tb])
-modelname = "ADModel"
+history = model.fit(train_set, validation_data=validation_set, batch_size=batches, epochs=epochs, shuffle=True, verbose=1, callbacks=[mc, tb])
+# Note: Add early stop back in at some point
+modelname = "ADModel_Testing"
 model.save(modelname)
 print(history.history)
 actual_epochs = len(history.history['val_loss'])
