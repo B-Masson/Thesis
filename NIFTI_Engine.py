@@ -18,6 +18,8 @@ print("Imported engine packages.")
 def extractArrays(scantype, w, h, d, orientation=0, root="C:\\Users\\richa\\Documents\\Uni\\Thesis\\central.xnat.org"):
     scan_array = []
     meta_array = []
+    min_intensity = 500
+    max_intensity = -1
     sample_dirs = os.listdir(root)
     print("Loading in scan data...")
     for sample in tqdm(sample_dirs):
@@ -30,6 +32,7 @@ def extractArrays(scantype, w, h, d, orientation=0, root="C:\\Users\\richa\\Docu
                     image_file = os.listdir(image_root)[0]
                     image_dir = op.join(image_root, image_file)
                     image_data_raw = nib.load(image_dir).get_fdata()
+                    print("Max of", image_data_raw.max(), "found.")
                     image_data = organiseImage(image_data_raw, w, h, d)
                     scan_array.append(image_data)
                     meta_segments = sample.split("_")
@@ -73,11 +76,18 @@ def extractArrays(scantype, w, h, d, orientation=0, root="C:\\Users\\richa\\Docu
             else: print("No NIFTI file found. This should not occur if the dataset is half-decent.")
         else:
             print("Warning:", sample, "does not possess data of type", scantype)
-    #print("Returned array has size", len(scan_array))
+    for i in range (len(scan_array)):
+        print("Checking normalization. Min: %.3f, Max: %.3f" % (scan_array[i].min(), scan_array[i].max()))
     return scan_array, meta_array
 
-# Remove unecessary ranges from the NIFTI data, then normalise to range from 0 to 1
-def normalize(image_data, min=-1000, max=400):
+# Normalise pixel values to range from 0 to 1:
+# Need to run AD_MinMax to get min and max values.
+def normalize(image_data, min=0, max=4095):
+    image_data = (image_data - min) / (max - min)
+    image_data = image_data.astype("float32")
+    return image_data
+
+def normalize_old(image_data, min=-1000, max=400):
     image_data[image_data < min] = min
     image_data[image_data > max] = max
     image_data = (image_data - min) / (max - min)
