@@ -1,5 +1,6 @@
 # Combined form of the AD_Process and AD_Train classes, to be fed into the HPC cluster at max sample size
 # Richard Masson
+print("IMPLEMENTATION: STANDARD")
 from nibabel import test
 import LabelReader as lr
 import NIFTI_Engine as ne
@@ -39,7 +40,7 @@ d = 64/scale
 #x_arr, scan_meta = ne.extractArrays('all', root="/home/rmasson/Documents/Data") # Linux workstation world
 rootloc = "/scratch/mssric004/Data" # HPC world
 if testing_mode:
-    rootloc = "/scratch/mssric004/Data_Small"
+    rootloc = "/scratch/mssric004/Data_Tiny"
     print("TEST MODE ENABLED.")
 x_arr, scan_meta = ne.extractArrays('all', w, h, d, root=rootloc)
 clinic_sessions, cdr_meta = lr.loadCDR()
@@ -79,7 +80,10 @@ else:
     x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr, stratify=y_arr) # Defaulting to 75 train, 25 val/test. Also shuffle=true and stratifytrue.
     x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, test_size=0.2) # 80/20 val/test, therefore 75/20/5 train/val/test.
 
-np.savez_compressed('testing', a=x_test, b=y_test)
+if testing_mode:
+    np.savez_compressed('testing_sub', a=x_test, b=y_test)
+else:
+    np.savez_compressed('testing', a=x_test, b=y_test)
 '''
 # Ascertain what the class breakdown is
 print("Class breakdowns:")
@@ -155,11 +159,11 @@ def gen_model_seq(width=128, height=128, depth=64, classes=3): # Make sure defau
 
 # Model hyperparameters
 if testing_mode:
-    epochs = 2
+    epochs = 2 #Small for testing purposes
     batches = 1
 else:
-    epochs = 10 # Small for testing purposes
-    batches = 2 # Going to need to fiddle with this over time (balance time save vs. running out of memory)
+    epochs = 30
+    batches = 8 # Going to need to fiddle with this over time (balance time save vs. running out of memory)
 
 # Data augmentation functions
 @tf.function
@@ -212,9 +216,9 @@ validation_set = (
 
 # Build model.
 model = gen_model(width=128, height=128, depth=64, classes=classNo)
-model2 = gen_model_seq(width=128, height=128, depth=64, classes=classNo)
+#model2 = gen_model_seq(width=128, height=128, depth=64, classes=classNo)
 model.summary()
-model2.summary()
+#model2.summary()
 optim = keras.optimizers.Adam(learning_rate=0.001) # LR chosen based on principle but double-check this later
 # Note: These things will have to change if this is changed into a regression model
 model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accuracy']) # Categorical loss since there are move than 2 classes.
@@ -231,7 +235,7 @@ tb = TensorBoard(log_dir=log_dir, histogram_freq=1)
 # Class weighting
 # Data distribution is {0: 2625, 1: 569, 2: 194}
 # So if we want to do this in equal ratiosit would {be 0:1., 1:5., 2:13.}
-class_weight = {0: 1., 1: 5., 2: 12.}
+class_weight = {0: 1., 1: 3., 2: 8.}
 
 # Run the model
 print("Fitting model...")
@@ -244,17 +248,20 @@ model.save(modelname)
 print(history.history)
 actual_epochs = len(history.history['val_loss'])
 print("Complete. Ran for ", actual_epochs, "/", epochs, " epochs.\nParameters saved to", modelname)
+for i in range(actual_epochs):
+    print("Epoch", i+1, ": Loss [", history.history['loss'][i], "] Val Loss [", history.history['val_loss'][i])
 
 from sklearn.metrics import classification_report
 
 # Generate a classification matrix
 print("Generating classification report...\n")
 Y_test = np.argmax(y_test, axis=1)
-y_pred = model.predict(np.expand_dims(x_test, axis=-1), batch_size=1)
+y_pred = model.predict(np.expand_dims(x_test, axis=-1), batch_size=2)
 y_pred = np.argmax(y_pred, axis=1)
 print("Actual test set:")
 print(Y_test)
 print("Predictions are  as follows:")
 print(y_pred)
 print(classification_report(Y_test, y_pred))
+
 print("Done.")
