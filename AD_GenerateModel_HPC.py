@@ -1,6 +1,9 @@
 # Combined form of the AD_Process and AD_Train classes, to be fed into the HPC cluster at max sample size
 # Richard Masson
 print("IMPLEMENTATION: STANDARD")
+print("CURRENT TEST: Normal approach, but with only two classes.")
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 from nibabel import test
 import LabelReader as lr
 import NIFTI_Engine as ne
@@ -8,7 +11,6 @@ import numpy as np
 import random
 from sklearn.model_selection import train_test_split
 import tensorflow as tf
-print(tf.version.VERSION)
 from scipy import ndimage
 from tensorflow import keras
 from tensorflow.keras import layers
@@ -19,9 +21,12 @@ import datetime
 from collections import Counter
 
 # Are we in testing mode?
-testing_mode = False
+testing_mode = True
+logname = "na"
 
-print("Start")
+# Class or regression, that is the question
+classmode = False
+
 # Attempt to better allocate memory.
 gpus = tf.config.experimental.list_physical_devices('GPU')
 for gpu in gpus:
@@ -45,32 +50,89 @@ if testing_mode:
 x_arr, scan_meta = ne.extractArrays('all', w, h, d, root=rootloc)
 clinic_sessions, cdr_meta = lr.loadCDR()
 
+def genClassLabels(scan_meta):
+    # Categorical approach
+    # Set cdr score for a given image based on the closest medical analysis
+    y_arr = []
+    for scan in scan_meta:
+        scan_day = scan['day']
+        scan_cdr = -1
+        cdr_day = -1
+        min = 100000
+        try:
+            for x in cdr_meta[scan['ID']]:
+                diff = abs(scan_day-x[0])
+                if diff < min:
+                    min = diff
+                    scan_cdr = x[1]
+                    cdr_day = x[0]
+            scaled_val = int(scan_cdr*2) #0 = 0, 0.5 = 1, 1 = 2 (elimate decimals)
+            #if scaled_val > 2:
+            #    scaled_val = 2 # Cap out at 2 since we can classify anything at 1 or above as AD
+            if scaled_val > 1: # TEMP FOR NOW
+                scaled_val = 1
+            y_arr.append(scaled_val) 
+        except KeyError as k:
+            print(k, "| Seems like the entry for that patient doesn't exist.")
+    classNo = len(np.unique(y_arr))
+    print("There are", classNo, "unique classes. ->", np.unique(y_arr), "in the dataset.")
+    classCount = Counter(y_arr)
+    print("Class count:", classCount)
+    y_arr = tf.keras.utils.to_categorical(y_arr)
+    return y_arr, classNo
+
+def genRegLabels(scan_meta):
+    # Regression approach
+    # If a scan lies between two different cdr values, then set the value based on the time frame
+    y_arr = []
+    for scan in scan_meta:
+        scan_day = scan['day']
+        scan_cdr_a = -1
+        scan_cdr_b = -1
+        cdr_day_a = -1
+        cdr_day_b = -1
+        min_a = 100000
+        min_b = 100000
+        try:
+            for x in cdr_meta[scan['ID']]:
+                if (x[0] > scan_day):
+                    diff = x[0]-scan_day
+                    #print("Meta day", x[0], "comes after scan day", scan_day, "- diff is ", diff)
+                    if diff < min_a:
+                        min_a = diff
+                        scan_cdr_a = x[1]
+                        cdr_day_a = x[0]
+                        #print("New record. Cdr from this:", scan_cdr_a)
+                else:
+                    diff = scan_day-x[0]
+                    #print("Meta day", x[0], "comes before scan day", scan_day, "- diff is ", diff)
+                    if diff < min_b:
+                        min_b = diff
+                        scan_cdr_b = x[1]
+                        cdr_day_b = x[0]
+                        #print("New record. Cdr from this:", scan_cdr_b)
+            #print("END. DIFF_BEFORE =", min_b, "AND AFTER =", min_a)
+            if scan_cdr_a == scan_cdr_b or scan_cdr_b == -1:
+                val = scan_cdr_a
+            elif scan_cdr_a == -1:
+                val = scan_cdr_b
+            else:
+                print("Scan", scan['ID'], "has cdr", scan_cdr_b, "at", cdr_day_b, " (", min_b, " days before ) and cdr", scan_cdr_a, "at", cdr_day_a, " (", min_a, "days after ).")
+                total_span = min_a+min_b
+                val = round(scan_cdr_a*(min_b/total_span + scan_cdr_b*(min_a/total_span)), 2)
+                print("Produces a scaled cdr of", val)
+            y_arr.append(val) 
+        except KeyError as k:
+            print(k, "| Seems like the entry for that patient doesn't exist.")
+    return y_arr
+
 # Generate some cdr y labels for each scan
-# Current plan: Use the cdr from the closest clinical entry by time (won't suffice in the longterm but it will do for now)
-y_arr = []
-for scan in scan_meta:
-    scan_day = scan['day']
-    scan_cdr = -1
-    cdr_day = -1
-    min = 100000
-    try:
-        for x in cdr_meta[scan['ID']]:
-            diff = abs(scan_day-x[0])
-            if diff < min:
-                min = diff
-                scan_cdr = x[1]
-                cdr_day = x[0]
-        scaled_val = int(scan_cdr*2) #0 = 0, 0.5 = 1, 1 = 2 (elimate decimals)
-        if scaled_val > 2:
-            scaled_val = 2 # Cap out at 2 since we can classify anything at 1 or above as "severe"
-        y_arr.append(scaled_val) 
-    except KeyError as k:
-        print(k, "| Seems like the entry for that patient doesn't exist.")
-classNo = len(np.unique(y_arr))
-print("There are", classNo, "unique classes. ->", np.unique(y_arr), "in the dataset.")
-classCount = Counter(y_arr)
-print("Class count:", classCount)
-y_arr = tf.keras.utils.to_categorical(y_arr)
+if (classmode):
+    print("Model type: Classification")
+    y_arr, classNo = genClassLabels(scan_meta)
+else:
+    print("Model type: Regression [Experimental]")
+    y_arr = genRegLabels(scan_meta)
 
 # Split data
 if testing_mode:
@@ -116,9 +178,8 @@ def gen_model(width=128, height=128, depth=64, classes=3): # Make sure defaults 
     x = layers.BatchNormalization()(x)
 
     x = layers.GlobalAveragePooling3D()(x)
-    x = layers.Dense(units=512, activation="relu")(x) # Implement a simple dense layer with double units
-    x = layers.Dropout(0.6)(x) # 30% dropout rate for now (this differs from original paper which used 60% so might get changed later)
-    # NOTE: CHANGED IT TO 60% DROPOUT BE SURE TO SEE IF THIS CHANGES ANYTHING
+    x = layers.Dense(units=518, activation="relu")(x) # Implement a simple dense layer with double units
+    x = layers.Dropout(0.5)(x) # 50% seems like a good tried and true value
 
     outputs = layers.Dense(units=classes, activation="softmax")(x) # Units = no of classes. Also softmax because we want that probability output
 
@@ -127,40 +188,43 @@ def gen_model(width=128, height=128, depth=64, classes=3): # Make sure defaults 
 
     return model
 
-def gen_model_seq(width=128, height=128, depth=64, classes=3): # Make sure defaults are equal to image resizing defaults
-    # Sequential built
-    model = keras.Sequential()
+def gen_model_reg(width=128, height=128, depth=64): # Make sure defaults are equal to image resizing defaults
+    # Initial build version - no explicit Sequential definition
+    inputs = keras.Input((width, height, depth, 1)) # Added extra dimension in preprocessing to accomodate that 4th dim
 
-    #model.add(keras.Input((width, height, depth, 1)))
-    input_shape = (width, height, depth)
-    model.add(layers.Conv3D(filters=64, kernel_size=3, activation="relu", input_shape=input_shape))
-    model.add(layers.MaxPool3D(pool_size=2))
-    model.add(layers.BatchNormalization())
+    # Contruction seems to be pretty much the same as if this was 2D. Kernal should default to 3,3,3
+    x = layers.Conv3D(filters=64, kernel_size=3, activation="relu")(inputs) # Layer 1: Usual 64 filter start
+    x = layers.MaxPool3D(pool_size=2)(x) # Usually max pool after the conv layer
+    x = layers.BatchNormalization()(x)
 
-    model.add(layers.Conv3D(filters=64, kernel_size=3, activation="relu"))
-    model.add(layers.MaxPool3D(pool_size=2))
-    model.add(layers.BatchNormalization())
+    x = layers.Conv3D(filters=64, kernel_size=3, activation="relu")(x)
+    x = layers.MaxPool3D(pool_size=2)(x)
+    x = layers.BatchNormalization()(x)
+    # NOTE: UNCOMMENTED THIS LINE AS WE CAN HOPEFULLY UP THE COMPLEXITY NOW
 
-    model.add(layers.Conv3D(filters=128, kernel_size=3, activation="relu"))
-    model.add(layers.MaxPool3D(pool_size=2))
-    model.add(layers.BatchNormalization())
+    x = layers.Conv3D(filters=128, kernel_size=3, activation="relu")(x) # Double the filters
+    x = layers.MaxPool3D(pool_size=2)(x)
+    x = layers.BatchNormalization()(x)
 
-    model.add(layers.Conv3D(filters=256, kernel_size=3, activation="relu"))
-    model.add(layers.MaxPool3D(pool_size=2))
-    model.add(layers.BatchNormalization())
+    x = layers.Conv3D(filters=256, kernel_size=3, activation="relu")(x) # Double filters one more time
+    x = layers.MaxPool3D(pool_size=2)(x)
+    x = layers.BatchNormalization()(x)
 
-    model.add(layers.GlobalAveragePooling3D())
-    model.add(layers.Dense(units=512, activation="relu"))
-    model.add(layers.Dropout(0.6))
+    x = layers.GlobalAveragePooling3D()(x)
+    x = layers.Dense(units=512, activation="relu")(x) # Implement a simple dense layer with double units
+    x = layers.Dropout(0.5)(x) # 50% seems like a good tried and true value
 
-    model.add(layers.Dense(units=classes, activation="softmax"))
+    outputs = layers.Dense(units=1)(x) # Regression needs no activation function?
+
+    # Define the model.
+    model = keras.Model(inputs, outputs, name="3DCNN_Reg")
 
     return model
 
 # Model hyperparameters
 if testing_mode:
     epochs = 2 #Small for testing purposes
-    batches = 1
+    batches = 3
 else:
     epochs = 30
     batches = 8 # Going to need to fiddle with this over time (balance time save vs. running out of memory)
@@ -182,13 +246,11 @@ def rotate(image):
     augmented_image = tf.numpy_function(scipy_rotate, [image], tf.float32)
     return augmented_image
 
-
 def train_preprocessing(image, label): # Only use for training, as it includes rotation augmentation
     # Rotate image
     image = rotate(image)
     image = tf.expand_dims(image, axis=3)
     return image, label
-
 
 def validation_preprocessing(image, label): # Can be used for val or test data (just ensures the dimensions are ok for the model)
     """Process validation data by only adding a channel."""
@@ -215,31 +277,45 @@ validation_set = (
 )
 
 # Build model.
-model = gen_model(width=128, height=128, depth=64, classes=classNo)
+if classmode:
+    model = gen_model(width=128, height=128, depth=64, classes=classNo)
+else:
+    model = gen_model_reg(width=128, height=128, depth=64)
 #model2 = gen_model_seq(width=128, height=128, depth=64, classes=classNo)
 model.summary()
 #model2.summary()
 optim = keras.optimizers.Adam(learning_rate=0.001) # LR chosen based on principle but double-check this later
 # Note: These things will have to change if this is changed into a regression model
-model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accuracy']) # Categorical loss since there are move than 2 classes.
+#model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accuracy']) # Categorical loss since there are move than 2 classes.
+if classmode:
+    model.compile(optimizer=optim, loss='binary_crossentropy', metrics=['accuracy']) # Temp binary for only two classes
+else:
+    model.compile(optimizer=optim, loss= "mean_squared_error", metrics=["mean_squared_error"]) # Regression compiler
 
 # Checkpointing & Early Stopping
-es = EarlyStopping(monitor='val_loss', patience=1, restore_best_weights=True)
+es = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
 checkpointname = "weight_history.h5"
 if testing_mode:
     checkpointname = "weight_history_testing.h5"
 mc = ModelCheckpoint(checkpointname, monitor='val_accuracy', mode='max', verbose=1, save_best_only=False)
-log_dir = "/scratch/mssric004/logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+if testing_mode:
+    log_dir = "/scratch/mssric004/test_logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+else:
+    if logname != "na":
+        log_dir = "/scratch/mssric004/logs/fit/" + logname
+    else:
+        log_dir = "/scratch/mssric004/logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 tb = TensorBoard(log_dir=log_dir, histogram_freq=1)
 
 # Class weighting
 # Data distribution is {0: 2625, 1: 569, 2: 194}
 # So if we want to do this in equal ratiosit would {be 0:1., 1:5., 2:13.}
-class_weight = {0: 1., 1: 3., 2: 8.}
+#class_weight = {0: 1., 1: 3., 2: 8.}
+class_weight = {0: 1., 1: 2.}
 
 # Run the model
 print("Fitting model...")
-history = model.fit(train_set, validation_data=validation_set, batch_size=batches, epochs=epochs, shuffle=True, verbose=1, callbacks=[mc, tb], class_weight=class_weight)
+history = model.fit(train_set, validation_data=validation_set, batch_size=batches, epochs=epochs, shuffle=True, verbose=1, callbacks=[mc, tb, es], class_weight=class_weight)
 # Note: Add early stop back in at some point
 modelname = "ADModel"
 if testing_mode:
@@ -251,17 +327,18 @@ print("Complete. Ran for ", actual_epochs, "/", epochs, " epochs.\nParameters sa
 for i in range(actual_epochs):
     print("Epoch", i+1, ": Loss [", history.history['loss'][i], "] Val Loss [", history.history['val_loss'][i])
 
-from sklearn.metrics import classification_report
-
 # Generate a classification matrix
-print("Generating classification report...\n")
-Y_test = np.argmax(y_test, axis=1)
-y_pred = model.predict(np.expand_dims(x_test, axis=-1), batch_size=2)
-y_pred = np.argmax(y_pred, axis=1)
-print("Actual test set:")
-print(Y_test)
-print("Predictions are  as follows:")
-print(y_pred)
-print(classification_report(Y_test, y_pred))
+if classmode:
+    from sklearn.metrics import classification_report
 
-print("Done.")
+    print("Generating classification report...\n")
+    Y_test = np.argmax(y_test, axis=1)
+    y_pred = model.predict(np.expand_dims(x_test, axis=-1), batch_size=2)
+    y_pred = np.argmax(y_pred, axis=1)
+    print("Actual test set:")
+    print(Y_test)
+    print("Predictions are  as follows:")
+    print(y_pred)
+    print(classification_report(Y_test, y_pred))
+
+    print("Done.")
