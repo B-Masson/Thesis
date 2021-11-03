@@ -1,7 +1,7 @@
 # Combined form of the AD_Process and AD_Train classes, to be fed into the HPC cluster at max sample size
 # Richard Masson
 print("IMPLEMENTATION: STANDARD")
-print("CURRENT TEST: Normal approach, but with only two classes.")
+print("CURRENT TEST: Improving weights for 2-class setup. Also tweaked some weights.")
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 from nibabel import test
@@ -19,13 +19,14 @@ from matplotlib import pyplot as plt
 import random
 import datetime
 from collections import Counter
+import pandas as pd
 
 # Are we in testing mode?
 testing_mode = True
-logname = "na"
+logname = "BetterWeighting-WeightsV1.2"
 
 # Class or regression, that is the question
-classmode = False
+classmode = True
 
 # Attempt to better allocate memory.
 gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -97,21 +98,16 @@ def genRegLabels(scan_meta):
             for x in cdr_meta[scan['ID']]:
                 if (x[0] > scan_day):
                     diff = x[0]-scan_day
-                    #print("Meta day", x[0], "comes after scan day", scan_day, "- diff is ", diff)
                     if diff < min_a:
                         min_a = diff
                         scan_cdr_a = x[1]
                         cdr_day_a = x[0]
-                        #print("New record. Cdr from this:", scan_cdr_a)
                 else:
                     diff = scan_day-x[0]
-                    #print("Meta day", x[0], "comes before scan day", scan_day, "- diff is ", diff)
                     if diff < min_b:
                         min_b = diff
                         scan_cdr_b = x[1]
                         cdr_day_b = x[0]
-                        #print("New record. Cdr from this:", scan_cdr_b)
-            #print("END. DIFF_BEFORE =", min_b, "AND AFTER =", min_a)
             if scan_cdr_a == scan_cdr_b or scan_cdr_b == -1:
                 val = scan_cdr_a
             elif scan_cdr_a == -1:
@@ -281,9 +277,7 @@ if classmode:
     model = gen_model(width=128, height=128, depth=64, classes=classNo)
 else:
     model = gen_model_reg(width=128, height=128, depth=64)
-#model2 = gen_model_seq(width=128, height=128, depth=64, classes=classNo)
 model.summary()
-#model2.summary()
 optim = keras.optimizers.Adam(learning_rate=0.001) # LR chosen based on principle but double-check this later
 # Note: These things will have to change if this is changed into a regression model
 #model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accuracy']) # Categorical loss since there are move than 2 classes.
@@ -297,7 +291,7 @@ es = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
 checkpointname = "weight_history.h5"
 if testing_mode:
     checkpointname = "weight_history_testing.h5"
-mc = ModelCheckpoint(checkpointname, monitor='val_accuracy', mode='max', verbose=1, save_best_only=False)
+mc = ModelCheckpoint(checkpointname, monitor='val_accuracy', mode='max', verbose=1, save_best_only=False) #Maybe change to true so we can more easily access the "best" epoch
 if testing_mode:
     log_dir = "/scratch/mssric004/test_logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 else:
@@ -309,7 +303,6 @@ tb = TensorBoard(log_dir=log_dir, histogram_freq=1)
 
 # Class weighting
 # Data distribution is {0: 2625, 1: 569, 2: 194}
-# So if we want to do this in equal ratiosit would {be 0:1., 1:5., 2:13.}
 #class_weight = {0: 1., 1: 3., 2: 8.}
 class_weight = {0: 1., 1: 2.}
 
@@ -326,19 +319,43 @@ actual_epochs = len(history.history['val_loss'])
 print("Complete. Ran for ", actual_epochs, "/", epochs, " epochs.\nParameters saved to", modelname)
 for i in range(actual_epochs):
     print("Epoch", i+1, ": Loss [", history.history['loss'][i], "] Val Loss [", history.history['val_loss'][i])
+best_epoch = np.argmin(history.history['val_loss']) + 1
+print("Epoch with lowest validation loss: Epoch", best_epoch, "[", history.history['loss'][best_epoch-1], "]")
+
+Y_test = np.argmax(y_test, axis=1)
+X_test = np.expand_dims(x_test, axis=-1)
+score = model.evaluate(X_test, Y_test, verbose=1)
+print("Evaluated scored:", score)
 
 # Generate a classification matrix
+def classification_report_csv(report, filename):
+    report_data = []
+    lines = report.split('\n')
+    for line in lines[2:-3]:
+        row = {}
+        row_data = line.split('      ')
+        row['class'] = row_data[0]
+        row['precision'] = float(row_data[1])
+        row['recall'] = float(row_data[2])
+        row['f1_score'] = float(row_data[3])
+        row['support'] = float(row_data[4])
+        report_data.append(row)
+    dataframe = pd.DataFrame.from_dict(report_data)
+    dataframe.to_csv(filename, index = False)
+
 if classmode:
     from sklearn.metrics import classification_report
 
     print("Generating classification report...\n")
-    Y_test = np.argmax(y_test, axis=1)
-    y_pred = model.predict(np.expand_dims(x_test, axis=-1), batch_size=2)
+    y_pred = model.predict(X_test, batch_size=2)
     y_pred = np.argmax(y_pred, axis=1)
     print("Actual test set:")
     print(Y_test)
     print("Predictions are  as follows:")
     print(y_pred)
-    print(classification_report(Y_test, y_pred))
-
-    print("Done.")
+    rep = classification_report(Y_test, y_pred)
+    print(rep)
+    try:
+        classification_report_csv(rep, "test.csv")
+    except IndexError as e:
+        print(e, "- report to csv still not working.")

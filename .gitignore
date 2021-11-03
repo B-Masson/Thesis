@@ -13,3 +13,4 @@ AD_GenerateModel_TestVersion.py
 *.pb
 *.index
 variables.*
+*.csv
