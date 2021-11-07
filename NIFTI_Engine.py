@@ -10,7 +10,6 @@ import matplotlib.pyplot as plt
 from scipy import ndimage
 from tqdm import tqdm
 from time import sleep
-print("Imported engine packages.")
 
 # Function: Run through an entire data folder and extract all data of a certain scan type. Graps NIFTI data and returns numpy arrays for the x-array
 # Also returns an an array alongside with the patient ID and the day of the MRI
@@ -22,8 +21,7 @@ def extractArrays(scantype, w, h, d, orientation=0, root="C:\\Users\\richa\\Docu
     max_intensity = -1
     sample_dirs = os.listdir(root)
     print("Loading in scan data...")
-    for sample in tqdm(sample_dirs):
-        sleep(0.25)
+    for sample in sample_dirs:
         if scantype == "all":
             for scan in os.listdir(op.join(root, sample)):
                 if ("anat" in scan) or ("func" in scan): #Mostly to sift out BIDS folders/random unwanted stuff
@@ -32,7 +30,6 @@ def extractArrays(scantype, w, h, d, orientation=0, root="C:\\Users\\richa\\Docu
                     image_file = os.listdir(image_root)[0]
                     image_dir = op.join(image_root, image_file)
                     image_data_raw = nib.load(image_dir).get_fdata()
-                    print("Max of", image_data_raw.max(), "found.")
                     image_data = organiseImage(image_data_raw, w, h, d)
                     scan_array.append(image_data)
                     meta_segments = sample.split("_")
@@ -76,8 +73,6 @@ def extractArrays(scantype, w, h, d, orientation=0, root="C:\\Users\\richa\\Docu
             else: print("No NIFTI file found. This should not occur if the dataset is half-decent.")
         else:
             print("Warning:", sample, "does not possess data of type", scantype)
-    for i in range (len(scan_array)):
-        print("Checking normalization. Min: %.3f, Max: %.3f" % (scan_array[i].min(), scan_array[i].max()))
     return scan_array, meta_array
 
 # Normalise pixel values to range from 0 to 1:
