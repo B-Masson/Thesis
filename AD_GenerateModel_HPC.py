@@ -1,7 +1,7 @@
 # Combined form of the AD_Process and AD_Train classes, to be fed into the HPC cluster at max sample size
 # Richard Masson
 print("IMPLEMENTATION: STANDARD")
-print("CURRENT TEST: Improving weights for 2-class setup. Also tweaked some weights.")
+print("CURRENT TEST: Utilise an alternative, far simpler model (still on old augs).")
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 from nibabel import test
@@ -22,11 +22,11 @@ from collections import Counter
 import pandas as pd
 
 # Are we in testing mode?
-testing_mode = True
-logname = "BetterWeighting-WeightsV1.2"
+testing_mode = False
+logname = "BabyModelV1"
 
 # Class or regression, that is the question
-classmode = True
+classmode = False
 
 # Attempt to better allocate memory.
 gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -152,6 +152,7 @@ print("Data has been preprocessed. Moving on to model...")
 '''
 # Model architecture go here
 def gen_model(width=128, height=128, depth=64, classes=3): # Make sure defaults are equal to image resizing defaults
+    '''
     # Initial build version - no explicit Sequential definition
     inputs = keras.Input((width, height, depth, 1)) # Added extra dimension in preprocessing to accomodate that 4th dim
 
@@ -178,6 +179,26 @@ def gen_model(width=128, height=128, depth=64, classes=3): # Make sure defaults 
     x = layers.Dropout(0.5)(x) # 50% seems like a good tried and true value
 
     outputs = layers.Dense(units=classes, activation="softmax")(x) # Units = no of classes. Also softmax because we want that probability output
+
+    '''
+    # Baby mode version (TO-DO)
+    inputs = keras.Input((width, height, depth, 1)) # Added extra dimension in preprocessing to accomodate that 4th dim
+
+    # Contruction seems to be pretty much the same as if this was 2D. Kernal should default to 3,3,3
+    x = layers.Conv3D(filters=16, kernel_size=3, activation="relu")(inputs) # Layer 1: Usual 64 filter start
+    x = layers.MaxPool3D(pool_size=2)(x) # Usually max pool after the conv layer
+    x = layers.BatchNormalization()(x)
+
+    x = layers.Conv3D(filters=32, kernel_size=3, activation="relu")(x)
+    x = layers.MaxPool3D(pool_size=2)(x)
+    x = layers.BatchNormalization()(x)
+
+    x = layers.GlobalAveragePooling3D()(x)
+    x = layers.Dense(units=128, activation="relu")(x) # Implement a simple dense layer with double units
+    x = layers.Dropout(0.5)(x) # 50% seems like a good tried and true value
+
+    outputs = layers.Dense(units=classes, activation="softmax")(x) # Units = no of classes. Also softmax because we want that probability output
+    
 
     # Define the model.
     model = keras.Model(inputs, outputs, name="3DCNN")
@@ -224,7 +245,7 @@ if testing_mode:
 else:
     epochs = 30
     batches = 8 # Going to need to fiddle with this over time (balance time save vs. running out of memory)
-
+'''
 # Data augmentation functions
 @tf.function
 def rotate(image):
@@ -241,10 +262,59 @@ def rotate(image):
 
     augmented_image = tf.numpy_function(scipy_rotate, [image], tf.float32)
     return augmented_image
+'''
+def rotate(image):
+    def scipy_rotate(image): # Rotate by random angular amount
+        # define some rotation angles
+        angles = [-20, -10, -5, 0, 0, 5, 10, 20]
+        # pick angles at random
+        angle = random.choice(angles)
+        # rotate image
+        image = ndimage.rotate(image, angle, reshape=False)
+        image[image < 0] = 0
+        image[image > 1] = 1
+        '''
+        # define some rotation angles
+        angles = [-20, -10, -5, 0, 0, 5, 10, 20]
+        # Pick angel at random
+        angle = random.choice(angles)
+        # Rotate on x axis
+        image2 = ndimage.interpolation.rotate(image, angle, mode='nearest', axes=(0, 1), reshape=False)
+        # Generate new angle
+        angle = random.choice(angles)
+        # Roate on y axis
+        image3 = ndimage.interpolation.rotate(image2, angle, mode='nearest', axes=(0, 2), reshape=False)
+        angle = random.choice(angles)
+        # Rotate on z axis
+        image_final = ndimage.interpolation.rotate(image3, angle, mode='nearest', axes=(1, 2), reshape=False)
+        image_final[image_final < 0] = 0
+        image_final[image_final > 1] = 1
+        return image_final
+        '''
+        return image
+
+    augmented_image = tf.numpy_function(scipy_rotate, [image], tf.float32)
+    return augmented_image
+
+def shift(image):
+    def scipy_shift(image):
+        # generate random x shift pixel value
+        x = (int)(random.uniform(-15, 15))
+        # generate random y shift pixel value
+        y = (int)(random.uniform(-15, 15))
+        image = ndimage.interpolation.shift(image, (x, y, 0), mode='nearest')
+        image[image < 0] = 0
+        image[image > 1] = 1
+        return image
+
+    augmented_image = tf.numpy_function(scipy_shift, [image], tf.float32)
+    return augmented_image
 
 def train_preprocessing(image, label): # Only use for training, as it includes rotation augmentation
     # Rotate image
     image = rotate(image)
+    # Now shift it
+    #image = shift(image)
     image = tf.expand_dims(image, axis=3)
     return image, label
 
@@ -254,6 +324,7 @@ def validation_preprocessing(image, label): # Can be used for val or test data (
     return image, label
 
 # Augment data, as well expand dimensions to make the training model accept it (by adding a 4th dimension)
+print("Setting up data augmenters...")
 train_loader = tf.data.Dataset.from_tensor_slices((x_train, y_train))
 validation_loader = tf.data.Dataset.from_tensor_slices((x_val, y_val))
 batch_size = batches
@@ -291,7 +362,7 @@ es = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
 checkpointname = "weight_history.h5"
 if testing_mode:
     checkpointname = "weight_history_testing.h5"
-mc = ModelCheckpoint(checkpointname, monitor='val_accuracy', mode='max', verbose=1, save_best_only=False) #Maybe change to true so we can more easily access the "best" epoch
+mc = ModelCheckpoint(checkpointname, monitor='val_accuracy', mode='max', verbose=2, save_best_only=False) #Maybe change to true so we can more easily access the "best" epoch
 if testing_mode:
     log_dir = "/scratch/mssric004/test_logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 else:
@@ -308,7 +379,7 @@ class_weight = {0: 1., 1: 2.}
 
 # Run the model
 print("Fitting model...")
-history = model.fit(train_set, validation_data=validation_set, batch_size=batches, epochs=epochs, shuffle=True, verbose=1, callbacks=[mc, tb, es], class_weight=class_weight)
+history = model.fit(train_set, validation_data=validation_set, batch_size=batches, epochs=epochs, verbose=2, shuffle=True, callbacks=[mc, tb, es], class_weight=class_weight)
 # Note: Add early stop back in at some point
 modelname = "ADModel"
 if testing_mode:
@@ -324,8 +395,6 @@ print("Epoch with lowest validation loss: Epoch", best_epoch, "[", history.histo
 
 Y_test = np.argmax(y_test, axis=1)
 X_test = np.expand_dims(x_test, axis=-1)
-score = model.evaluate(X_test, Y_test, verbose=1)
-print("Evaluated scored:", score)
 
 # Generate a classification matrix
 def classification_report_csv(report, filename):
@@ -359,3 +428,9 @@ if classmode:
         classification_report_csv(rep, "test.csv")
     except IndexError as e:
         print(e, "- report to csv still not working.")
+
+# Final evaluation
+score = model.evaluate(X_test, Y_test, verbose=0, batch_size=2)
+print("Evaluated scored:", score)
+
+print("Done.")
