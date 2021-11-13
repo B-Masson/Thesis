@@ -1,7 +1,7 @@
 # Combined form of the AD_Process and AD_Train classes, to be fed into the HPC cluster at max sample size
 # Richard Masson
 print("IMPLEMENTATION: STANDARD")
-print("CURRENT TEST: Testing the interpolation-based 3D augmentation on a known working path.")
+print("CURRENT TEST: Make the interpolation augmentation a little less intense.")
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 from nibabel import test
@@ -23,7 +23,7 @@ import pandas as pd
 
 # Are we in testing mode?
 testing_mode = False
-logname = "InterpolationAugmentation"
+logname = "InterpolationAugmentation_Improved"
 
 # Class or regression, that is the question
 classmode = True
@@ -226,11 +226,10 @@ else:
     batches = 8 # Going to need to fiddle with this over time (balance time save vs. running out of memory)
 
 # Data augmentation functions
-@tf.function
 def rotate(image):
     def scipy_rotate(image): # Rotate by random angular amount
         # define some rotation angles
-        angles = [-20, -10, -5, 0, 0, 5, 10, 20]
+        angles = [-5, -3, -2, -1, 0, 0, 1, 2, 3, 5]
         # Pick angel at random
         angle = random.choice(angles)
         # Rotate on x axis
@@ -265,7 +264,9 @@ def shift(image):
 
 def train_preprocessing(image, label): # Only use for training, as it includes rotation augmentation
     # Rotate image
-    image = rotate(image)
+    #image = rotate(image)
+    # Shift image?
+    image = shift(image)
     image = tf.expand_dims(image, axis=3)
     return image, label
 

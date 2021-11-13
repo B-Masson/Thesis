@@ -1,7 +1,7 @@
 # Combined form of the AD_Process and AD_Train classes, to be fed into the HPC cluster at max sample size
 # Richard Masson
 print("IMPLEMENTATION: STANDARD")
-print("CURRENT TEST: Utilise an alternative, far simpler model (still on old augs).")
+print("CURRENT TEST: Using simpler model again, this time with less intense augmentation.")
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 from nibabel import test
@@ -23,10 +23,10 @@ import pandas as pd
 
 # Are we in testing mode?
 testing_mode = False
-logname = "BabyModelV1"
+logname = "BabyModelV1.1"
 
 # Class or regression, that is the question
-classmode = False
+classmode = True
 
 # Attempt to better allocate memory.
 gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -266,7 +266,7 @@ def rotate(image):
 def rotate(image):
     def scipy_rotate(image): # Rotate by random angular amount
         # define some rotation angles
-        angles = [-20, -10, -5, 0, 0, 5, 10, 20]
+        angles = [-5, -3, -2, -1, 0, 0, 1, 2, 3, 5]
         # pick angles at random
         angle = random.choice(angles)
         # rotate image
