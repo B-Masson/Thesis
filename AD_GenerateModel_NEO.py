@@ -1,5 +1,7 @@
 # Combined form of the AD_Process and AD_Train classes, to be fed into the HPC cluster at max sample size
 # Richard Masson
+# Info: Obsolete code. Used to test the premise of a two-class classification system, which has since been adopted to the other versions.
+# Last use in 2021: October 29th
 print("IMPLEMENTATION: NEO")
 print("CURRENT TEST: NEO model, only two classes, and shift augmentation.")
 from nibabel import test

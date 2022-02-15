@@ -1,9 +1,9 @@
 # Combined form of the AD_Process and AD_Train classes, to be fed into the HPC cluster at max sample size
 # Richard Masson
-# Info: Divergent path for testing stuff. Current differences: interpolation rotation, shift is active, no k-fold, no seperate test-set.
-# Last use in 2021: November 13th
+# Info: Version that uses that guy's experimental augmentation package. Currently not working.
+# Last use in 2021: November 8th
 print("IMPLEMENTATION: STANDARD")
-print("CURRENT TEST: Make the interpolation augmentation a little less intense.")
+print("CURRENT TEST: Experimental augmentation trainer thing.")
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 #from nibabel import test
@@ -22,11 +22,10 @@ import random
 import datetime
 from collections import Counter
 import pandas as pd
-#buffer line
 
 # Are we in testing mode?
-testing_mode = False
-logname = "InterpolationAugmentation_Improved"
+testing_mode = True
+logname = "AugmentationTest"
 
 # Class or regression, that is the question
 classmode = True
@@ -132,7 +131,7 @@ if (classmode):
 else:
     print("Model type: Regression [Experimental]")
     y_arr = genRegLabels(scan_meta)
-
+'''
 # Split data
 if testing_mode:
     x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr) # ONLY USING WHILE THE SET IS TOO SMALL FOR STRATIFICATION
@@ -146,6 +145,15 @@ if testing_mode:
 else:
     np.savez_compressed('testing', a=x_test, b=y_test)
 '''
+# Split data (for augmentation protocol)
+seed = 39 # arbitrary number
+if testing_mode:
+    x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr, random_state=seed)
+    x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, test_size=0.2)
+else:
+    x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr, random_state=seed, stratify=y_arr)
+    x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, test_size=0.2)
+'''
 # Ascertain what the class breakdown is
 print("Class breakdowns:")
 print("Training:", collections.Counter(y_train))
@@ -153,9 +161,6 @@ print("Validation:", collections.Counter(y_val))
 print("Testing:", collections.Counter(y_test))
 print("Data has been preprocessed. Moving on to model...")
 '''
-# buffer
-# buffer
-# buffer
 # Model architecture go here
 def gen_model(width=128, height=128, depth=64, classes=3): # Make sure defaults are equal to image resizing defaults
     # Initial build version - no explicit Sequential definition
@@ -223,26 +228,6 @@ def gen_model_reg(width=128, height=128, depth=64): # Make sure defaults are equ
 
     return model
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # Model hyperparameters
 if testing_mode:
     epochs = 2 #Small for testing purposes
@@ -250,26 +235,36 @@ if testing_mode:
 else:
     epochs = 30
     batches = 8 # Going to need to fiddle with this over time (balance time save vs. running out of memory)
-
+'''
 # Data augmentation functions
+@tf.function
 def rotate(image):
     def scipy_rotate(image): # Rotate by random angular amount
         # define some rotation angles
-        angles = [-5, -3, -2, -1, 0, 0, 1, 2, 3, 5]
-        # Pick angel at random
+        angles = [-20, -10, -5, 5, 10, 20]
+        # pick angles at random
         angle = random.choice(angles)
-        # Rotate on x axis
-        image2 = ndimage.interpolation.rotate(image, angle, mode='nearest', axes=(0, 1), reshape=False)
-        # Generate new angle
+        # rotate image
+        image = ndimage.rotate(image, angle, reshape=False)
+        image[image < 0] = 0
+        image[image > 1] = 1
+        return image
+
+    augmented_image = tf.numpy_function(scipy_rotate, [image], tf.float32)
+    return augmented_image
+'''
+'''
+def rotate(image):
+    def scipy_rotate(image): # Rotate by random angular amount
+        # define some rotation angles
+        angles = [-20, -10, -5, 5, 10, 20]
+        # pick angles at random
         angle = random.choice(angles)
-        # Roate on y axis
-        image3 = ndimage.interpolation.rotate(image2, angle, mode='nearest', axes=(0, 2), reshape=False)
-        angle = random.choice(angles)
-        # Rotate on z axis
-        image_final = ndimage.interpolation.rotate(image3, angle, mode='nearest', axes=(1, 2), reshape=False)
-        image_final[image_final < 0] = 0
-        image_final[image_final > 1] = 1
-        return image_final
+        # rotate image
+        image = ndimage.rotate(image, angle, reshape=False)
+        image[image < 0] = 0
+        image[image > 1] = 1
+        return image
 
     augmented_image = tf.numpy_function(scipy_rotate, [image], tf.float32)
     return augmented_image
@@ -288,37 +283,10 @@ def shift(image):
     augmented_image = tf.numpy_function(scipy_shift, [image], tf.float32)
     return augmented_image
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def train_preprocessing(image, label): # Only use for training, as it includes rotation augmentation
     # Rotate image
-    #image = rotate(image)
-    # Shift image?
+    image = rotate(image)
+    # Now shift it
     image = shift(image)
     image = tf.expand_dims(image, axis=3)
     return image, label
@@ -346,6 +314,16 @@ validation_set = (
     .batch(batch_size)
     .prefetch(batch_size)
 )
+'''
+# Create augmented generators using the Augmented Volumetric Image Generator package
+# End output: train_set, validation_set
+import generator as ge
+aug_gen = ge.customImageDataGenerator(rotation_range = 20)
+x_train_datagen = aug_gen.flow(x_train, batch_size = batches, seed=seed)
+train_set = zip(x_train_datagen, y_train)
+
+x_val_datagen = aug_gen.flow(x_val, batch_size = batches, seed=seed)
+validation_set = zip(x_val_datagen, y_val)
 
 # Build model.
 if classmode:
@@ -353,7 +331,7 @@ if classmode:
 else:
     model = gen_model_reg(width=128, height=128, depth=64)
 model.summary()
-optim = keras.optimizers.Adam(learning_rate=0.001) # LR chosen based on principle but double-check this later
+optim = keras.optimizers.Adam(learning_rate=0.0005) # LR chosen based on principle but double-check this later
 # Note: These things will have to change if this is changed into a regression model
 #model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accuracy']) # Categorical loss since there are move than 2 classes.
 if classmode:
@@ -361,23 +339,12 @@ if classmode:
 else:
     model.compile(optimizer=optim, loss= "mean_squared_error", metrics=["mean_squared_error"]) # Regression compiler
 
-
-
-
-
-
-
-# Class weighting
-# Data distribution is {0: 2625, 1: 569, 2: 194}
-#class_weight = {0: 1., 1: 3., 2: 8.}
-class_weight = {0: 1., 1: 2.}
-
 # Checkpointing & Early Stopping
 es = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
 checkpointname = "weight_history.h5"
 if testing_mode:
     checkpointname = "weight_history_testing.h5"
-mc = ModelCheckpoint(checkpointname, monitor='val_accuracy', mode='max', verbose=2, save_best_only=False) #Maybe change to true so we can more easily access the "best" epoch
+mc = ModelCheckpoint(checkpointname, monitor='val_accuracy', mode='max', verbose=1, save_best_only=False) #Maybe change to true so we can more easily access the "best" epoch
 if testing_mode:
     log_dir = "/scratch/mssric004/test_logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 else:
@@ -387,19 +354,16 @@ else:
         log_dir = "/scratch/mssric004/logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 tb = TensorBoard(log_dir=log_dir, histogram_freq=1)
 
-
-
-
-
-
-
-
+# Class weighting
+# Data distribution is {0: 2625, 1: 569, 2: 194}
+#class_weight = {0: 1., 1: 3., 2: 8.}
+class_weight = {0: 1., 1: 2.}
 
 # Run the model
 print("Fitting model...")
-history = model.fit(train_set, validation_data=validation_set, batch_size=batches, epochs=epochs, shuffle=True, verbose=2, callbacks=[mc, tb, es], class_weight=class_weight)
+history = model.fit(train_set, validation_data=validation_set, batch_size=batches, epochs=epochs, shuffle=True, callbacks=[mc, tb, es], class_weight=class_weight)
 # Note: Add early stop back in at some point
-modelname = "ADModel_Alt"
+modelname = "ADModel"
 if testing_mode:
     modelname = "ADModel_Testing"
 model.save(modelname)
@@ -413,7 +377,7 @@ print("Epoch with lowest validation loss: Epoch", best_epoch, "[", history.histo
 
 Y_test = np.argmax(y_test, axis=1)
 X_test = np.expand_dims(x_test, axis=-1)
-'''
+
 # Generate a classification matrix
 def classification_report_csv(report, filename):
     report_data = []
@@ -429,7 +393,7 @@ def classification_report_csv(report, filename):
         report_data.append(row)
     dataframe = pd.DataFrame.from_dict(report_data)
     dataframe.to_csv(filename, index = False)
-'''
+
 if classmode:
     from sklearn.metrics import classification_report
 
@@ -442,9 +406,13 @@ if classmode:
     print(y_pred)
     rep = classification_report(Y_test, y_pred)
     print(rep)
+    try:
+        classification_report_csv(rep, "test.csv")
+    except IndexError as e:
+        print(e, "- report to csv still not working.")
 
 # Final evaluation
-score = model.evaluate(X_test, Y_test, verbose=0, batch_size=2)
+score = model.evaluate(X_test, Y_test, verbose=1, batch_size=2)
 print("Evaluated scored:", score)
 
 print("Done.")

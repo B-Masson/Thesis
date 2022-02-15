@@ -1,10 +1,12 @@
 # Combined form of the AD_Process and AD_Train classes, to be fed into the HPC cluster at max sample size
 # Richard Masson
+# Info: Old version of the code. No seperate datasets, shift interpolation, old rotation values. In case a greatly simplified approach is needed.
+# Last use in 2021: November 8th
 print("IMPLEMENTATION: STANDARD")
 print("CURRENT TEST: Testing if results of the model hold up multiple times.")
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
-from nibabel import test
+#from nibabel import test
 import LabelReader as lr
 import NIFTI_Engine as ne
 import numpy as np
@@ -21,9 +23,10 @@ import datetime
 from collections import Counter
 import pandas as pd
 
+
 # Are we in testing mode?
 testing_mode = True
-logname = "BetterWeighting-WeightsV1.1-Run3"
+logname = "PureVersion1.1"
 
 # Class or regression, that is the question
 classmode = True
@@ -184,6 +187,29 @@ def gen_model(width=128, height=128, depth=64, classes=3): # Make sure defaults 
 
     return model
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def gen_model_reg(width=128, height=128, depth=64): # Make sure defaults are equal to image resizing defaults
     # Initial build version - no explicit Sequential definition
     inputs = keras.Input((width, height, depth, 1)) # Added extra dimension in preprocessing to accomodate that 4th dim
@@ -217,6 +243,28 @@ def gen_model_reg(width=128, height=128, depth=64): # Make sure defaults are equ
 
     return model
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 # Model hyperparameters
 if testing_mode:
     epochs = 2 #Small for testing purposes
@@ -241,6 +289,53 @@ def rotate(image):
 
     augmented_image = tf.numpy_function(scipy_rotate, [image], tf.float32)
     return augmented_image
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 def train_preprocessing(image, label): # Only use for training, as it includes rotation augmentation
     # Rotate image
@@ -271,6 +366,10 @@ validation_set = (
     .batch(batch_size)
     .prefetch(batch_size)
 )
+
+
+
+
 
 # Build model.
 if classmode:
@@ -306,11 +405,23 @@ tb = TensorBoard(log_dir=log_dir, histogram_freq=1)
 #class_weight = {0: 1., 1: 3., 2: 8.}
 class_weight = {0: 1., 1: 2.}
 
+
+
+
+
+
+
+
+
+
+
+
+
 # Run the model
 print("Fitting model...")
 history = model.fit(train_set, validation_data=validation_set, batch_size=batches, epochs=epochs, shuffle=True, verbose=1, callbacks=[mc, tb, es], class_weight=class_weight)
 # Note: Add early stop back in at some point
-modelname = "ADModel_Alt"
+modelname = "ADModel_Pure"
 if testing_mode:
     modelname = "ADModel_Testing"
 model.save(modelname)
