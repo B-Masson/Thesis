@@ -1,6 +1,6 @@
 # Combined form of the AD_Process and AD_Train classes, to be fed into the HPC cluster at max sample size
 # Richard Masson
-# Info: Core version of the code. When in doubt, use this. K-fold IS NOT implemented. K version currently improves this for that reason.
+# Info: Temporary version of the HPC class where I run tests on the old OASIS vers.
 # Last use in 2021: Novemeber 16th
 print("IMPLEMENTATION: STANDARD")
 print("CURRENT TEST: Standard run minus k-fold.")
@@ -40,17 +40,17 @@ for gpu in gpus:
 
 # Define image size (lower image resolution in order to speed up for broad testing)
 if testing_mode:
-    scale = 4 # while testing, scale down the image size by a factor of X
+    scale = 1
 else:
-    scale = 1 # while training, do we use the full size or not?
+    scale = 1
 # Default dimensions
-#w = 128/scale
-#h = 128/scale
-#d = 64/scale
+w = 128/scale
+h = 128/scale
+d = 64/scale
 # ADNI dimensions (need to verify this at some point)
-w = int(208/scale)
-h = int(240/scale)
-d = int(256/scale)
+#w = 208
+#h = 240
+#d = 256
 
 # Fetch all our seperated data
 #x_arr, scan_meta = ne.extractArrays('all', root="/home/rmasson/Documents/Data") # Linux workstation world
@@ -60,9 +60,9 @@ if testing_mode:
     rootloc = "/scratch/mssric004/Data_Tiny"
     adniloc = "/scratch/mssric004/ADNI_Test"
     print("TEST MODE ENABLED.")
-#x_arr, scan_meta = ne.extractArrays('all', w, h, d, root=rootloc)
-#clinic_sessions, cdr_meta = lr.loadCDR()
-x_arr, y_arr = ne.extractADNI(w, h, d, root=adniloc)
+x_arr, scan_meta = ne.extractArrays('all', w, h, d, root=rootloc)
+clinic_sessions, cdr_meta = lr.loadCDR()
+#x_arr, y_arr = ne.extractADNI(w, h, d, root=adniloc)
 
 def genClassLabels(scan_meta):
     # Categorical approach
@@ -135,10 +135,10 @@ def genRegLabels(scan_meta):
             print(k, "| Seems like the entry for that patient doesn't exist.")
     return y_arr
 
-print("x arr shape:", np.shape(x_arr))
-print(y_arr)
+#print(len(x_arr), "x array elements.")
+#print(y_arr)
 print("Label generation is currently commented out since we're working with ADNI.")
-'''
+
 # Generate some cdr y labels for each scan
 if (classmode):
     print("Model type: Classification")
@@ -146,10 +146,10 @@ if (classmode):
 else:
     print("Model type: Regression [Experimental]")
     y_arr = genRegLabels(scan_meta)
-'''
+
 
 print("Data successfully loaded in.")
-force_diversity = False # Quick code to force-introduce class 1 to tiny test sets
+force_diversity = True # Quick code to force-introduce class 1 to tiny test sets
 if testing_mode:
     if force_diversity:
         print("ACTIVATING CLASS DIVERSITY MODE")
@@ -383,12 +383,12 @@ def train_preprocessing(image, label): # Only use for training, as it includes r
     image = rotate(image)
     # Now shift it
     #image = shift(image)
-    #image = tf.expand_dims(image, axis=3) # Only needed for OASIS data
+    image = tf.expand_dims(image, axis=3)
     return image, label
 
 def validation_preprocessing(image, label): # Can be used for val or test data (just ensures the dimensions are ok for the model)
     """Process validation data by only adding a channel."""
-    #image = tf.expand_dims(image, axis=3) # Only needed for OASIS data
+    image = tf.expand_dims(image, axis=3)
     return image, label
 
 print("Ready to apply augmentations.")
@@ -411,10 +411,11 @@ validation_set = (
     .batch(batch_size)
     .prefetch(batch_size)
 )
+print("Set up.")
 
 # Build model.
 if classmode:
-    model = gen_model(width=w, height=h, depth=d, classes=classNo)
+    model = gen_model(width=128, height=128, depth=64, classes=classNo)
 else:
     model = gen_model_reg(width=128, height=128, depth=64)
 model.summary()
@@ -462,6 +463,7 @@ kfold = KFold(n_splits=n_folds, shuffle=True)
 print("Fitting model...")
 
 print("Shape of input set:", np.shape(x_train))
+sys.exit()
 if testing_mode:
     history = model.fit(train_set, validation_data=validation_set, batch_size=batches, epochs=epochs, verbose=0)
 else:
@@ -501,19 +503,17 @@ if classmode and not testing_mode:
     from sklearn.metrics import classification_report
 
     print("Generating classification report...\n")
-    y_pred = model.predict(x_test, batch_size=2)
+    y_pred = model.predict(X_test, batch_size=2)
     y_pred = np.argmax(y_pred, axis=1)
     print("Actual test set:")
-    print(x_test)
+    print(Y_test)
     print("Predictions are  as follows:")
     print(y_pred)
-    rep = classification_report(y_test, y_pred)
+    rep = classification_report(Y_test, y_pred)
     print(rep)
 
-# Final evaluation
-x_test = np.asarray(x_test)
-y_test = np.asarray(y_test)
-score = model.evaluate(x_test, y_test, verbose=0, batch_size=1)
-print("Evaluated scored:", score)
+    # Final evaluation
+    score = model.evaluate(X_test, Y_test, verbose=0, batch_size=2)
+    print("Evaluated scored:", score)
 
 print("Done.")
