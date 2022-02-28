@@ -60,8 +60,10 @@ if testing_mode:
     rootloc = "/scratch/mssric004/Data_Tiny"
     adniloc = "/scratch/mssric004/ADNI_Test"
     print("TEST MODE ENABLED.")
+cdr_meta = []
 #x_arr, scan_meta = ne.extractArrays('all', w, h, d, root=rootloc)
 #clinic_sessions, cdr_meta = lr.loadCDR()
+print("ADNI Mode engaged.")
 x_arr, y_arr = ne.extractADNI(w, h, d, root=adniloc)
 
 def genClassLabels(scan_meta):
