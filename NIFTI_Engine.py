@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from scipy import ndimage
 from tqdm import tqdm
 from time import sleep
+import tensorflow as tf
 
 # Function: Run through an entire data folder and extract all data of a certain scan type. Graps NIFTI data and returns numpy arrays for the x-array
 # Also returns an an array alongside with the patient ID and the day of the MRI
@@ -75,42 +76,143 @@ def extractArrays(scantype, w, h, d, orientation=0, root="C:\\Users\\richa\\Docu
             print("Warning:", sample, "does not possess data of type", scantype)
     return scan_array, meta_array
 
-def extractADNI(w, h, d, orientation=0, root="C:\\Users\\richa\\Documents\\Uni\\Thesis\\central.xnat.org"):
+def extractADNI(w, h, d, orientation=0, root="C:\\Users\\richa\\Documents\\Uni\\Thesis\\central.xnat.org", mode=3):
     scan_array = []
     label_array = []
+    class_array = []
     class_dirs = os.listdir(root)
-    print("Loading in scan data...")
+    exclusions = "na"
+    ADcounter = 0 # No. of incorrect file types found in AD folder
+    Xcounter = 0 # No. of incorrect file types outside AD
+    if mode == 1:
+        exclusions = "AD"
+        print("Mode: Classify CN vs. MCI")
+    elif mode == 2:
+        exclusions = "MCI"
+        print("Mode: Classify CN vs. AD")
+    else:
+        print("Mode: Classify from all 3 categories.")
+    print("\nLoading in scan data...\n")
     for classes in class_dirs:
-        for scan in os.listdir(op.join(root, classes)):
-            for type in os.listdir(op.join(root, classes, scan)):
-                for date in os.listdir(op.join(root, classes, scan, type)):
-                    for image_folder in os.listdir(op.join(root, classes, scan, type, date)):
-                        image_root = op.join(root, classes, scan, type, date, image_folder)
-                        #print("Reading file at", image_root, ": ", os.listdir(image_root)[0])
-                        image_file = os.listdir(image_root)[0]
-                        image_dir = op.join(image_root, image_file)
-                        #print(image_dir)
-                        image_data_raw = nib.load(image_dir).get_fdata()
-                        image_data = organiseADNI(image_data_raw, w, h, d)
-                        scan_array.append(image_data)
-                        if classes == "CN":
-                            label_array.append(0)
-                        elif classes == "MCI" or classes == "AD":
-                            label_array.append(1)
-                        else:
-                            print("One of the folders does not match any of the expected forms.")
-                        try:
-                            if orientation == 1:
-                                plt.imshow(image_data[50,:,:], cmap='bone')
-                                plt.savefig("ADNI_1.png")
-                            elif orientation == 2:
-                                plt.imshow(image_data[:,50,:], cmap='bone')
-                                plt.savefig("ADNI_2.png")
-                            elif orientation == 3:
-                                plt.imshow(image_data[:,:,30], cmap='bone')
-                                plt.savefig("ADNI_3.png")
-                        except TypeError as e:
-                            print("Cannot display example slices:", e)
+        if classes != exclusions and classes != "Zips":
+            for scan in os.listdir(op.join(root, classes)):
+                for type in os.listdir(op.join(root, classes, scan)):
+                    for date in os.listdir(op.join(root, classes, scan, type)):
+                        for image_folder in os.listdir(op.join(root, classes, scan, type, date)):
+                            image_root = op.join(root, classes, scan, type, date, image_folder)
+                            image_file = os.listdir(image_root)[0]
+                            image_dir = op.join(image_root, image_file)
+                            #print("Reading file at", image_dir)
+                            image_data_raw = nib.load(image_dir).get_fdata()
+                            image_data = organiseADNI(image_data_raw, w, h, d)
+                            scan_array.append(image_data)
+                            if classes == "CN":
+                                label_array.append(0)
+                                #print("Setting label to 0 (CN)")
+                            elif classes == "MCI":
+                                label_array.append(1)
+                                #print("Setting label to 1 (MCI)")
+                            elif classes == "AD":
+                                label_array.append(2)
+                                #print("Setting label to 2 (AD")
+                            else:
+                                print("One of the folders does not match any of the expected forms.")
+                            '''
+                            try:
+                                image_data_raw = nib.load(image_dir).get_fdata()
+                                image_data = organiseADNI(image_data_raw, w, h, d)
+                                scan_array.append(image_data)
+                                if classes == "CN":
+                                    label_array.append(0)
+                                elif classes == "MCI":
+                                    label_array.append(1)
+                                elif classes == "AD":
+                                    label_array.append(2)
+                                else:
+                                    print("One of the folders does not match any of the expected forms.")
+                            except:
+                                if classes == "AD":
+                                    ADcounter += 1
+                                else:
+                                    Xcounter += 1
+                            '''
+                            try:
+                                if orientation == 1:
+                                    plt.imshow(image_data[50,:,:], cmap='bone')
+                                    plt.savefig("ADNI_1.png")
+                                elif orientation == 2:
+                                    plt.imshow(image_data[:,50,:], cmap='bone')
+                                    plt.savefig("ADNI_2.png")
+                                elif orientation == 3:
+                                    plt.imshow(image_data[:,:,30], cmap='bone')
+                                    plt.savefig("ADNI_3.png")
+                            except TypeError as e:
+                                print("Cannot display example slices:", e)
+                            class_array.append(classes)
+    print("Samples with the wrong data type: AD[", ADcounter, " ] Else[", Xcounter, " ]")
+    return scan_array, label_array
+
+def extractADNILoader(w, h, d, orientation=0, root="C:\\Users\\richa\\Documents\\Uni\\Thesis\\central.xnat.org", mode=3):
+    scan_array = []
+    label_array = []
+    class_array = []
+    class_dirs = os.listdir(root)
+    exclusions = "na"
+    if mode == 1:
+        exclusions = "AD"
+        print("Mode: Classify CN vs. MCI")
+    elif mode == 2:
+        exclusions = "MCI"
+        print("Mode: Classify CN vs. AD")
+    else:
+        print("Mode: Classify from all 3 categories.")
+    print("\nLoading in scan data...\n")
+    for classes in class_dirs:
+        if classes != exclusions and classes != "Zips":
+            for scan in os.listdir(op.join(root, classes)):
+                for type in os.listdir(op.join(root, classes, scan)):
+                    for date in os.listdir(op.join(root, classes, scan, type)):
+                        for image_folder in os.listdir(op.join(root, classes, scan, type, date)):
+                            image_root = op.join(root, classes, scan, type, date, image_folder)
+                            image_file = os.listdir(image_root)[0]
+                            image_dir = op.join(image_root, image_file)
+                            image_data_raw = nib.load(image_dir).get_fdata()
+                            image_data = organiseADNI(image_data_raw, w, h, d)
+                            scan_array.append(image_data)
+                            if classes == "CN":
+                                label_array.append(0)
+                            elif classes == "MCI":
+                                label_array.append(1)
+                            elif classes == "AD":
+                                label_array.append(2)
+                            else:
+                                print("One of the folders does not match any of the expected forms.")
+                            class_array.append(classes)
+    scan_array = np.asarray(scan_array)
+    label_array = np.asarray(label_array)
+    print(scan_array[0].shape)
+    dataset = tf.data.Dataset.from_tensor_slices((scan_array, label_array))
+    return dataset
+
+def extractSingle(w, h, d, root, type):
+    types = os.listdir(root)
+    dates = os.listdir(op.join(root, types[0]))
+    folders = os.listdir(op.join(root, types[0], dates[0]))
+    images = os.listdir(op.join(root, types[0], dates[0], folders[0]))
+    true_root = op.join(root, types[0], dates[0], folders[0], images[0])
+    scan_array = []
+    label_array = []
+    image_data_raw = nib.load(true_root).get_fdata()
+    image_data = organiseADNI(image_data_raw, w, h, d)
+    scan_array.append(image_data)
+    if type == "CN":
+        label_array.append(0)
+    elif type == "MCI":
+        label_array.append(1)
+    elif type == "AD":
+        label_array.append(2)
+    else:
+        print("Incorrect class inputted.")
     return scan_array, label_array
 
 # Normalise pixel values to range from 0 to 1:
@@ -155,6 +257,7 @@ def resizeADNI(image_data, w = 208, h = 240, d = 256):
     length_factor = 1
     # Resize using factors
     image_data = ndimage.zoom(image_data, (width_factor, height_factor, depth_factor, length_factor), order=1)
+    #image_data = ndimage.zoom(image_data, (width_factor, height_factor, depth_factor), order=1)
     return image_data
 
 def organiseImage(data, w, h, d):
