@@ -1,9 +1,9 @@
-# Combined form of the AD_Process and AD_Train classes, to be fed into the HPC cluster at max sample size
+# NEO code, only this time it's using OASIS dataset (to check it it'll test better)
 # Richard Masson
-# Info: Temporary version of the HPC class where I run tests on the old OASIS vers.
+# Info: Can using an OASIS vers. save us?
 # Last use in 2021: Novemeber 16th
-print("IMPLEMENTATION: STANDARD")
-print("CURRENT TEST: Standard run minus k-fold.")
+print("IMPLEMENTATION: OASIS")
+print("CURRENT TEST: NEO OASIS Testing")
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 #from nibabel import test
@@ -137,8 +137,8 @@ def genRegLabels(scan_meta):
 
 #print(len(x_arr), "x array elements.")
 #print(y_arr)
-print("Label generation is currently commented out since we're working with ADNI.")
-
+#print("Label generation is currently commented out since we're working with ADNI.")
+'''
 # Generate some cdr y labels for each scan
 if (classmode):
     print("Model type: Classification")
@@ -146,13 +146,13 @@ if (classmode):
 else:
     print("Model type: Regression [Experimental]")
     y_arr = genRegLabels(scan_meta)
-
+'''
 
 print("Data successfully loaded in.")
-force_diversity = True # Quick code to force-introduce class 1 to tiny test sets
+force_diversity = False # Quick code to force-introduce class 1 to tiny test sets
 if testing_mode:
     if force_diversity:
-        print("ACTIVATING CLASS DIVERSITY MODE")
+        print("ACTIVATING CLASS DIVERSITY MODE. THIS SHOULD ONLY HAPPEN IN TESTING MODE.")
         mid = int(len(y_arr)/2)
         new_arr = []
         for i in range (len(y_arr)):

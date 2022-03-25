@@ -3,7 +3,7 @@
 # Info: Core version of the code. When in doubt, use this. K-fold IS NOT implemented. K version currently improves this for that reason.
 # Last use in 2021: Novemeber 16th
 print("IMPLEMENTATION: STANDARD")
-print("CURRENT TEST: Standard run minus k-fold.")
+print("CURRENT TEST: Standard run, testing various scaling options that work for the memory.")
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 #from nibabel import test
@@ -27,20 +27,28 @@ import sys
 
 # Are we in testing mode?
 testing_mode = True
-logname = "ShinModelV1.2"
+logname = "ShinModelV2.2"
+modelname = "ADModel_Proto"
+
+# Model hyperparameters
+if testing_mode:
+    epochs = 2 #Small for testing purposes
+    batches = 1
+else:
+    epochs = 20
+    batches = 1 # Going to need to fiddle with this over time (balance time save vs. running out of memory)
 
 # Class or regression, that is the question
 classmode = True
-classNo = 2 # Expected value
-
+'''
 # Attempt to better allocate memory.
 gpus = tf.config.experimental.list_physical_devices('GPU')
 for gpu in gpus:
   tf.config.experimental.set_memory_growth(gpu, True)
-
+'''
 # Define image size (lower image resolution in order to speed up for broad testing)
 if testing_mode:
-    scale = 4 # while testing, scale down the image size by a factor of X
+    scale = 2 # while testing, scale down the image size by a factor of X
 else:
     scale = 1 # while training, do we use the full size or not?
 # Default dimensions
@@ -55,7 +63,7 @@ d = int(256/scale)
 # Fetch all our seperated data
 #x_arr, scan_meta = ne.extractArrays('all', root="/home/rmasson/Documents/Data") # Linux workstation world
 rootloc = "/scratch/mssric004/Data" # HPC world
-adniloc = "/scratch/mssric004/ADNI_Data"
+adniloc = "/scratch/mssric004/ADNI_Data_NIFTI"
 if testing_mode:
     rootloc = "/scratch/mssric004/Data_Tiny"
     adniloc = "/scratch/mssric004/ADNI_Test"
@@ -64,7 +72,14 @@ cdr_meta = []
 #x_arr, scan_meta = ne.extractArrays('all', w, h, d, root=rootloc)
 #clinic_sessions, cdr_meta = lr.loadCDR()
 print("ADNI Mode engaged.")
-x_arr, y_arr = ne.extractADNI(w, h, d, root=adniloc)
+modo = 1 # 1 for CN/MCI, 2 for CN/AD, 3 for CN/MCI/AD
+if modo == 3:
+    classNo = 3 # Expected value
+else:
+    classNo = 2 # Expected value
+x_arr, y_arr = ne.extractADNI(w, h, d, root=adniloc, mode=modo)
+unique, counts = np.unique(y_arr, return_counts=True)
+print(dict(zip(unique, counts)))
 
 def genClassLabels(scan_meta):
     # Categorical approach
@@ -137,9 +152,9 @@ def genRegLabels(scan_meta):
             print(k, "| Seems like the entry for that patient doesn't exist.")
     return y_arr
 
-print("x arr shape:", np.shape(x_arr))
-print(y_arr)
-print("Label generation is currently commented out since we're working with ADNI.")
+#print("x arr shape:", np.shape(x_arr))
+#print(y_arr)
+#print("Label generation is currently commented out since we're working with ADNI.")
 '''
 # Generate some cdr y labels for each scan
 if (classmode):
@@ -185,12 +200,10 @@ else:
     x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr, stratify=y_arr) # Defaulting to 75 train, 25 val/test. Also shuffle=true and stratifytrue.
     x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, test_size=0.2) # 80/20 val/test, therefore 75/20/5 train/val/test.
     #x_train, x_test, y_train, y_test = train_test_split(x_arr, y_arr, stratify=y_arr ,test_size=0.2)
-'''
-if testing_mode:
-    np.savez_compressed('testing_sub', a=x_test, b=y_test)
-else:
+
+if not testing_mode:
     np.savez_compressed('testing', a=x_test, b=y_test)
-'''
+
 '''
 # Ascertain what the class breakdown is
 print("Class breakdowns:")
@@ -209,10 +222,10 @@ def gen_model(width=128, height=128, depth=64, classes=3): # Make sure defaults 
     x = layers.MaxPool3D(pool_size=2)(x) # Usually max pool after the conv layer
     x = layers.BatchNormalization()(x)
 
-    x = layers.Conv3D(filters=64, kernel_size=3, activation="relu")(x)
-    x = layers.MaxPool3D(pool_size=2)(x)
-    x = layers.BatchNormalization()(x)
-    # NOTE: UNCOMMENTED THIS LINE AS WE CAN HOPEFULLY UP THE COMPLEXITY NOW
+    #x = layers.Conv3D(filters=64, kernel_size=3, activation="relu")(x)
+    #x = layers.MaxPool3D(pool_size=2)(x)
+    #x = layers.BatchNormalization()(x)
+    # NOTE: RECOMMENTED LOL
 
     x = layers.Conv3D(filters=128, kernel_size=3, activation="relu")(x) # Double the filters
     x = layers.MaxPool3D(pool_size=2)(x)
@@ -308,13 +321,7 @@ def gen_model_reg(width=128, height=128, depth=64): # Make sure defaults are equ
 
 
 
-# Model hyperparameters
-if testing_mode:
-    epochs = 2 #Small for testing purposes
-    batches = 3
-else:
-    epochs = 30
-    batches = 8 # Going to need to fiddle with this over time (balance time save vs. running out of memory)
+
 '''
 # Data augmentation functions
 @tf.function
@@ -382,7 +389,7 @@ def shift(image):
 
 def train_preprocessing(image, label): # Only use for training, as it includes rotation augmentation
     # Rotate image
-    image = rotate(image)
+    #image = rotate(image) # Currently not rotating to test if this is causing the bug
     # Now shift it
     #image = shift(image)
     #image = tf.expand_dims(image, axis=3) # Only needed for OASIS data
@@ -435,14 +442,14 @@ else:
 # Class weighting
 # Data distribution is {0: 2625, 1: 569, 2: 194}
 #class_weight = {0: 1., 1: 3., 2: 8.}
-class_weight = {0: 1., 1: 2.}
+#class_weight = {0: 1., 1: 2.}
 
 # Checkpointing & Early Stopping
 es = EarlyStopping(monitor='val_loss', patience=30, restore_best_weights=True) # Temp at 30 to circumvent issue with first epoch behaving weirdly
 checkpointname = "weight_history.h5"
 if testing_mode:
     checkpointname = "weight_history_testing.h5"
-mc = ModelCheckpoint(checkpointname, monitor='val_loss', mode='min', verbose=2, save_best_only=False) #Maybe change to true so we can more easily access the "best" epoch
+mc = ModelCheckpoint(checkpointname, monitor='val_loss', mode='min', verbose=2, save_best_only=True) #Maybe change to true so we can more easily access the "best" epoch
 if testing_mode:
     log_dir = "/scratch/mssric004/test_logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 else:
@@ -468,7 +475,6 @@ if testing_mode:
     history = model.fit(train_set, validation_data=validation_set, batch_size=batches, epochs=epochs, verbose=0)
 else:
     history = model.fit(train_set, validation_data=validation_set, batch_size=batches, epochs=epochs, verbose=0, shuffle=True, callbacks=[mc, tb, es], class_weight=class_weight)
-modelname = "ADModel_True"
 if testing_mode:
     modelname = "ADModel_Testing"
 model.save(modelname)
@@ -499,11 +505,13 @@ def classification_report_csv(report, filename):
     dataframe = pd.DataFrame.from_dict(report_data)
     dataframe.to_csv(filename, index = False)
 '''
-if classmode and not testing_mode:
+'''
+if classmode:
     from sklearn.metrics import classification_report
 
     print("Generating classification report...\n")
-    y_pred = model.predict(x_test, batch_size=2)
+    #y_pred = model.predict(x_test, batch_size=2)
+    y_pred = model.predict(x_test)
     y_pred = np.argmax(y_pred, axis=1)
     print("Actual test set:")
     print(x_test)
@@ -511,11 +519,13 @@ if classmode and not testing_mode:
     print(y_pred)
     rep = classification_report(y_test, y_pred)
     print(rep)
-
+'''
 # Final evaluation
 x_test = np.asarray(x_test)
 y_test = np.asarray(y_test)
-score = model.evaluate(x_test, y_test, verbose=0, batch_size=1)
-print("Evaluated scored:", score)
+scores = model.evaluate(x_test, y_test, verbose=0, batch_size=2)
+acc = scores[1]*100
+loss = scores[0]
+print("Evaluated scores - Acc:", acc, "Loss:", loss)
 
 print("Done.")
