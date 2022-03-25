@@ -30,7 +30,12 @@ from sklearn.model_selection import KFold
 import sys
 import matplotlib.pyplot as plt
 
-testing_mode = True
+testing_mode = False
+
+# Attempt to better allocate memory.
+gpus = tf.config.experimental.list_physical_devices('GPU')
+for gpu in gpus:
+  tf.config.experimental.set_memory_growth(gpu, True)
 
 def buildEncoder(w, h, d, compression=2):
     #bottleneck = int(200000/compression)
@@ -125,10 +130,10 @@ def buildSimpleEncoder(w, h, d):
     model_dec = keras.Model(inputs_dec, dec, name="Simple Decoder")
     return model_enc, model_dec
 
-print("Powering up the Brain Encoder...")
+print("POWERING UP THE BRAIN ENCODER...")
 
 if testing_mode:
-    scale = 4 # while testing, scale down the image size by a factor of X
+    scale = 1 # while testing, scale down the image size by a factor of X
 else:
     scale = 1 # while training, do we use the full size or not?
 
@@ -136,48 +141,24 @@ else:
 w = int(208/scale)
 h = int(240/scale)
 d = int(256/scale)
-wt = 160 # Force it to test that one page
-ht = 64
-dt = 64
 
 # Fetch all our seperated data
-adniloc = "/scratch/mssric004/ADNI_Data"
+adniloc = "/scratch/mssric004/ADNI_Data_NIFTI"
 if testing_mode:
     adniloc = "/scratch/mssric004/ADNI_Test"
     print("TEST MODE ENABLED.")
-x_arr, y_arr = ne.extractADNI(w, h, d, root=adniloc)
+if testing_mode:
+    modo = 1
+else:
+    modo = 1 # For now
+x_arr, y_arr = ne.extractADNI(w, h, d, root=adniloc, mode=modo)
 print("Data successfully loaded in.")
 print("Raw data shape:", np.array(x_arr).shape)
 
-force_diversity = False
-if testing_mode:
-    if force_diversity:
-        print("ACTIVATING CLASS DIVERSITY MODE")
-        mid = int(len(y_arr)/2)
-        new_arr = []
-        for i in range (len(y_arr)):
-            if i < mid:
-                new_arr.append(0)
-            else:
-                new_arr.append(1)
-        random.shuffle(new_arr)
-        y_arr = new_arr
-        print("Diversified set:", y_arr)
-
 # Split data
 if testing_mode:
-    if force_diversity:
-        x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr, stratify=y_arr)
-        print("y train:", y_train)
-        print("y val:", y_val)
-        if len(y_val) >= 5:
-            x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, test_size=0.2)
-        else:
-            print("Dataset too small to fully stratify - temporarily bypassing that...")
-            x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, test_size=0.2)
-    else:
-        x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr) # ONLY USING WHILE THE SET IS TOO SMALL FOR STRATIFICATION
-        x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, test_size=0.2) # ALSO TESTING BRANCH NO STRATIFY LINE
+    x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr) # ONLY USING WHILE THE SET IS TOO SMALL FOR STRATIFICATION
+    x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, test_size=0.2) # ALSO TESTING BRANCH NO STRATIFY LINE
 else:
     x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr, stratify=y_arr) # Defaulting to 75 train, 25 val/test. Also shuffle=true and stratifytrue.
     x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, test_size=0.2) # 80/20 val/test, therefore 75/20/5 train/val/test.
@@ -220,7 +201,7 @@ auto = keras.Model(inputs, dec, name="Conv_Autoencoder")
 auto.summary()
 #plot_model(auto, "autoencoder.png", show_shapes=True)
 print("Done.")
-auto.compile(optimizer='adam', loss='mse')
+auto.compile(optimizer='adam', loss='mse', metrics='accuracy')
 '''
 
 # Test image outputs
@@ -228,21 +209,21 @@ plt.imshow(x_test[0][:,:,30], cmap='bone')
 plt.savefig("ADNI_slice.png")
 '''
 # Hyper-params
-epochs = 2
-if not testing_mode:
-    epochs = epochs*10
 if testing_mode:
-    batches = 3
+    epochs = 1
+    batches = 1
 else:
-    batches = 8
+    epochs = 5
+    batches = 1
 
 # Fit the data (autoencoder)
 print("Attempting to fit data to autoencoder...")
 print("Training set shape:", np.array(x_train).shape)
+print("Compression scale:", scale, "| Batch size:", batches, "| Epochs:", epochs)
 x_train = np.array(x_train)
 x_val = np.array(x_val)
 x_test = np.array(x_test)
-hist = auto.fit(x_train, x_train, epochs=epochs, batch_size=batches, shuffle=True, validation_data=(x_val, x_val))
+hist = auto.fit(x_train, x_train, epochs=epochs, batch_size=batches, shuffle=True, validation_data=(x_val, x_val), verbose=0)
 print("Model trained!")
 modelname = "Autoencoder"
 if testing_mode:
@@ -251,14 +232,19 @@ auto.save(modelname)
 
 # Test it out
 print("Attempting to test the data...")
+scores = auto.evaluate(x_test, x_test, verbose=0, batch_size=1)
+acc = scores[1]*100
+loss = scores[0]
+print("Evaluated scores - Acc:", acc, "Loss:", loss)
 index = randrange(len(x_test))
-predictions = auto.predict(x_test)
+predictions = auto.predict(x_test, batch_size=1)
 test_image = x_test[index]
 test_pred = predictions[index]
 plt.imshow(test_image[:,:,30], cmap='bone')
 plt.savefig("test_original.png")
 plt.imshow(test_pred[:,:,30], cmap='bone')
 plt.savefig("test_prediction.png")
+
 
 # Use trained autoencoder to produce encoder model
 print("Saving an encoder based on the previous results...")
