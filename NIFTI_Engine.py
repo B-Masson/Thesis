@@ -30,7 +30,8 @@ def extractArrays(scantype, w, h, d, orientation=0, root="C:\\Users\\richa\\Docu
                     #print("Reading file at", image_root, ": ", os.listdir(image_root)[0])
                     image_file = os.listdir(image_root)[0]
                     image_dir = op.join(image_root, image_file)
-                    image_data_raw = nib.load(image_dir).get_fdata()
+                    #image_data_raw = nib.load(image_dir).get_fdata()
+                    image_data_raw = nib.load(image_dir).get_data().astype('int16')
                     image_data = organiseImage(image_data_raw, w, h, d)
                     scan_array.append(image_data)
                     meta_segments = sample.split("_")
@@ -82,8 +83,8 @@ def extractADNI(w, h, d, orientation=0, root="C:\\Users\\richa\\Documents\\Uni\\
     class_array = []
     class_dirs = os.listdir(root)
     exclusions = "na"
-    ADcounter = 0 # No. of incorrect file types found in AD folder
-    Xcounter = 0 # No. of incorrect file types outside AD
+    #ADcounter = 0 # No. of incorrect file types found in AD folder
+    #Xcounter = 0 # No. of incorrect file types outside AD
     if mode == 1:
         exclusions = "AD"
         print("Mode: Classify CN vs. MCI")
@@ -103,7 +104,8 @@ def extractADNI(w, h, d, orientation=0, root="C:\\Users\\richa\\Documents\\Uni\\
                             image_file = os.listdir(image_root)[0]
                             image_dir = op.join(image_root, image_file)
                             #print("Reading file at", image_dir)
-                            image_data_raw = nib.load(image_dir).get_fdata()
+                            #image_data_raw = nib.load(image_dir).get_fdata()
+                            image_data_raw = nib.load(image_dir).get_data().astype('int16')
                             image_data = organiseADNI(image_data_raw, w, h, d)
                             scan_array.append(image_data)
                             if classes == "CN":
@@ -149,7 +151,7 @@ def extractADNI(w, h, d, orientation=0, root="C:\\Users\\richa\\Documents\\Uni\\
                             except TypeError as e:
                                 print("Cannot display example slices:", e)
                             class_array.append(classes)
-    print("Samples with the wrong data type: AD[", ADcounter, " ] Else[", Xcounter, " ]")
+    #print("Samples with the wrong data type: AD[", ADcounter, " ] Else[", Xcounter, " ]")
     return scan_array, label_array
 
 def extractADNILoader(w, h, d, orientation=0, root="C:\\Users\\richa\\Documents\\Uni\\Thesis\\central.xnat.org", mode=3):
@@ -194,6 +196,92 @@ def extractADNILoader(w, h, d, orientation=0, root="C:\\Users\\richa\\Documents\
     dataset = tf.data.Dataset.from_tensor_slices((scan_array, label_array))
     return dataset
 
+def extractProxies(root, mode=3):
+    scan_array = []
+    label_array = []
+    class_array = []
+    class_dirs = os.listdir(root)
+    exclusions = "na"
+    if mode == 1:
+        exclusions = "AD"
+        print("Mode: Classify CN vs. MCI")
+    elif mode == 2:
+        exclusions = "MCI"
+        print("Mode: Classify CN vs. AD")
+    else:
+        print("Mode: Classify from all 3 categories.")
+    print("\nLoading in scan data...\n")
+    for classes in class_dirs:
+        if classes != exclusions and classes != "Zips":
+            for scan in os.listdir(op.join(root, classes)):
+                for type in os.listdir(op.join(root, classes, scan)):
+                    for date in os.listdir(op.join(root, classes, scan, type)):
+                        for image_folder in os.listdir(op.join(root, classes, scan, type, date)):
+                            image_root = op.join(root, classes, scan, type, date, image_folder)
+                            image_file = os.listdir(image_root)[0]
+                            image_dir = op.join(image_root, image_file)
+                            image_data_raw = nib.load(image_dir)
+                            #image_data = organiseADNI(image_data_raw, w, h, d)
+                            scan_array.append(image_data_raw)
+                            if classes == "CN":
+                                label_array.append(0)
+                            elif classes == "MCI":
+                                label_array.append(1)
+                            elif classes == "AD":
+                                label_array.append(2)
+                            else:
+                                print("One of the folders does not match any of the expected forms.")
+                            class_array.append(classes)
+    #scan_array = np.asarray(scan_array)
+    #label_array = np.asarray(label_array)
+    #print(scan_array[0].shape)
+    #dataset = tf.data.Dataset.from_tensor_slices((scan_array, label_array))
+    return scan_array, label_array
+
+def extractDirs(root, mode=3):
+    dir_array = []
+    label_array = []
+    class_dirs = os.listdir(root)
+    exclusions = "na"
+    if mode == 1:
+        exclusions = "AD"
+        print("Mode: Classify CN vs. MCI")
+    elif mode == 2:
+        exclusions = "MCI"
+        print("Mode: Classify CN vs. AD")
+    else:
+        print("Mode: Classify from all 3 categories.")
+    print("\nLoading in scan data...\n")
+    for classes in class_dirs:
+        if classes != exclusions and classes != "Zips":
+            for scan in os.listdir(op.join(root, classes)):
+                for type in os.listdir(op.join(root, classes, scan)):
+                    for date in os.listdir(op.join(root, classes, scan, type)):
+                        for image_folder in os.listdir(op.join(root, classes, scan, type, date)):
+                            image_root = op.join(root, classes, scan, type, date, image_folder)
+                            image_file = os.listdir(image_root)[0]
+                            image_dir = op.join(image_root, image_file)
+                            dir_array.append(image_dir)
+                            #image_data_raw = nib.load(image_dir)
+                            #image_data = organiseADNI(image_data_raw, w, h, d)
+                            #scan_array.append(image_data_raw)
+                            if classes == "CN":
+                                label_array.append(0)
+                            elif classes == "MCI":
+                                label_array.append(1)
+                            elif classes == "AD":
+                                label_array.append(2)
+                            else:
+                                print("One of the folders does not match any of the expected forms.")
+                            #class_array.append(classes)
+    #scan_array = np.asarray(scan_array)
+    dir_array = np.asarray(dir_array)
+    label_array = np.asarray(label_array)
+    #print(scan_array[0].shape)
+    #dataset = tf.data.Dataset.from_tensor_slices((scan_array, label_array))
+    return dir_array, label_array
+
+
 def extractSingle(w, h, d, root, type):
     types = os.listdir(root)
     dates = os.listdir(op.join(root, types[0]))
@@ -219,14 +307,14 @@ def extractSingle(w, h, d, root, type):
 # Need to run AD_MinMax to get min and max values.
 def normalize(image_data, min=0, max=4095):
     image_data = (image_data - min) / (max - min)
-    image_data = image_data.astype("float32")
+    image_data = image_data.astype("float32") # Changed from 32
     return image_data
 
 def normalize_old(image_data, min=-1000, max=400):
     image_data[image_data < min] = min
     image_data[image_data > max] = max
     image_data = (image_data - min) / (max - min)
-    image_data = image_data.astype("float32")
+    image_data = image_data.astype("float32") # Changed from 32
     return image_data
 
 # Resize the data to some uniform amount so it actually fits into a training model

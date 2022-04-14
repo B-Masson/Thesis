@@ -1,18 +1,20 @@
-# Combined form of the AD_Process and AD_Train classes, to be fed into the HPC cluster at max sample size
+# Messing around with stuff without breaking the original version of the code.
 # Richard Masson
-# Info: Divergent path for testing stuff. Current differences: interpolation rotation, shift is active, no k-fold, no seperate test-set.
-# Last use in 2021: November 13th
-print("IMPLEMENTATION: STANDARD")
-print("CURRENT TEST: Make the interpolation augmentation a little less intense.")
+# Info: Trying to fix the model since I'm convinced it's scuffed.
+# Last use in 2021: October 29th
+print("\nIMPLEMENTATION: TWIN")
+print("CURRENT TEST: Testing the super spicy model I found online")
+# TO DO: Implement augmentations. Elastic deformation and intensity control are top contenders.
 import os
+import subprocess as sp # Memory shit
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
-#from nibabel import test
-import LabelReader as lr
+import nibabel as nib
 import NIFTI_Engine as ne
 import numpy as np
 import random
 from sklearn.model_selection import train_test_split
 import tensorflow as tf
+#print("TF Version:", tf.version.VERSION)
 from scipy import ndimage
 from tensorflow import keras
 from tensorflow.keras import layers
@@ -21,241 +23,132 @@ from matplotlib import pyplot as plt
 import random
 import datetime
 from collections import Counter
-import pandas as pd
-#buffer line
+import sys
+from volumentations import * # OI, WE NEED TO CITE VOLUMENTATIONS NOW
+print("Imports working.")
 
-# Are we in testing mode?
-testing_mode = False
-logname = "InterpolationAugmentation_Improved"
+# Memory shit
+def gpu_memory_usage(gpu_id):
+    command = f"nvidia-smi --id={gpu_id} --query-gpu=memory.used --format=csv"
+    output_cmd = sp.check_output(command.split())
+    
+    memory_used = output_cmd.decode("ascii").split("\n")[1]
+    # Get only the memory part as the result comes as '10 MiB'
+    memory_used = int(memory_used.split()[0])
 
-# Class or regression, that is the question
-classmode = True
+    return memory_used
+# The gpu you want to check
+gpu_id = 0
+initial_memory_usage = gpu_memory_usage(gpu_id)
 
 # Attempt to better allocate memory.
+
 gpus = tf.config.experimental.list_physical_devices('GPU')
 for gpu in gpus:
   tf.config.experimental.set_memory_growth(gpu, True)
-
-# Define image size (lower image resolution in order to speed up for broad testing)
-if testing_mode:
-    scale = 1
-else:
-    scale = 1 # Quarter the size of optimal
-w = 128/scale
-h = 128/scale
-d = 64/scale
-
-# Fetch all our seperated data
-#x_arr, scan_meta = ne.extractArrays('all', root="/home/rmasson/Documents/Data") # Linux workstation world
-rootloc = "/scratch/mssric004/Data" # HPC world
-if testing_mode:
-    rootloc = "/scratch/mssric004/Data_Tiny"
-    print("TEST MODE ENABLED.")
-x_arr, scan_meta = ne.extractArrays('all', w, h, d, root=rootloc)
-clinic_sessions, cdr_meta = lr.loadCDR()
-
-def genClassLabels(scan_meta):
-    # Categorical approach
-    # Set cdr score for a given image based on the closest medical analysis
-    y_arr = []
-    for scan in scan_meta:
-        scan_day = scan['day']
-        scan_cdr = -1
-        cdr_day = -1
-        min = 100000
-        try:
-            for x in cdr_meta[scan['ID']]:
-                diff = abs(scan_day-x[0])
-                if diff < min:
-                    min = diff
-                    scan_cdr = x[1]
-                    cdr_day = x[0]
-            scaled_val = int(scan_cdr*2) #0 = 0, 0.5 = 1, 1 = 2 (elimate decimals)
-            #if scaled_val > 2:
-            #    scaled_val = 2 # Cap out at 2 since we can classify anything at 1 or above as AD
-            if scaled_val > 1: # TEMP FOR NOW
-                scaled_val = 1
-            y_arr.append(scaled_val) 
-        except KeyError as k:
-            print(k, "| Seems like the entry for that patient doesn't exist.")
-    classNo = len(np.unique(y_arr))
-    print("There are", classNo, "unique classes. ->", np.unique(y_arr), "in the dataset.")
-    classCount = Counter(y_arr)
-    print("Class count:", classCount)
-    y_arr = tf.keras.utils.to_categorical(y_arr)
-    return y_arr, classNo
-
-def genRegLabels(scan_meta):
-    # Regression approach
-    # If a scan lies between two different cdr values, then set the value based on the time frame
-    y_arr = []
-    for scan in scan_meta:
-        scan_day = scan['day']
-        scan_cdr_a = -1
-        scan_cdr_b = -1
-        cdr_day_a = -1
-        cdr_day_b = -1
-        min_a = 100000
-        min_b = 100000
-        try:
-            for x in cdr_meta[scan['ID']]:
-                if (x[0] > scan_day):
-                    diff = x[0]-scan_day
-                    if diff < min_a:
-                        min_a = diff
-                        scan_cdr_a = x[1]
-                        cdr_day_a = x[0]
-                else:
-                    diff = scan_day-x[0]
-                    if diff < min_b:
-                        min_b = diff
-                        scan_cdr_b = x[1]
-                        cdr_day_b = x[0]
-            if scan_cdr_a == scan_cdr_b or scan_cdr_b == -1:
-                val = scan_cdr_a
-            elif scan_cdr_a == -1:
-                val = scan_cdr_b
-            else:
-                print("Scan", scan['ID'], "has cdr", scan_cdr_b, "at", cdr_day_b, " (", min_b, " days before ) and cdr", scan_cdr_a, "at", cdr_day_a, " (", min_a, "days after ).")
-                total_span = min_a+min_b
-                val = round(scan_cdr_a*(min_b/total_span + scan_cdr_b*(min_a/total_span)), 2)
-                print("Produces a scaled cdr of", val)
-            y_arr.append(val) 
-        except KeyError as k:
-            print(k, "| Seems like the entry for that patient doesn't exist.")
-    return y_arr
-
-# Generate some cdr y labels for each scan
-if (classmode):
-    print("Model type: Classification")
-    y_arr, classNo = genClassLabels(scan_meta)
-else:
-    print("Model type: Regression [Experimental]")
-    y_arr = genRegLabels(scan_meta)
-
-# Split data
-if testing_mode:
-    x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr) # ONLY USING WHILE THE SET IS TOO SMALL FOR STRATIFICATION
-    x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, test_size=0.2) # ALSO TESTING BRANCH NO STRATIFY LINE
-else:
-    x_train, x_val, y_train, y_val = train_test_split(x_arr, y_arr, stratify=y_arr) # Defaulting to 75 train, 25 val/test. Also shuffle=true and stratifytrue.
-    x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, test_size=0.2) # 80/20 val/test, therefore 75/20/5 train/val/test.
-
-if testing_mode:
-    np.savez_compressed('testing_sub', a=x_test, b=y_test)
-else:
-    np.savez_compressed('testing', a=x_test, b=y_test)
 '''
-# Ascertain what the class breakdown is
-print("Class breakdowns:")
-print("Training:", collections.Counter(y_train))
-print("Validation:", collections.Counter(y_val))
-print("Testing:", collections.Counter(y_test))
-print("Data has been preprocessed. Moving on to model...")
+config = tf.compat.v1.ConfigProto()
+config.gpu_options.allow_growth=True
+sess = tf.compat.v1.Session(config=config)
 '''
-# buffer
-# buffer
-# buffer
-# Model architecture go here
-def gen_model(width=128, height=128, depth=64, classes=3): # Make sure defaults are equal to image resizing defaults
-    # Initial build version - no explicit Sequential definition
-    inputs = keras.Input((width, height, depth, 1)) # Added extra dimension in preprocessing to accomodate that 4th dim
+from datetime import date
+print("Today's date:", date.today())
 
-    # Contruction seems to be pretty much the same as if this was 2D. Kernal should default to 3,3,3
-    x = layers.Conv3D(filters=64, kernel_size=3, activation="relu")(inputs) # Layer 1: Usual 64 filter start
-    x = layers.MaxPool3D(pool_size=2)(x) # Usually max pool after the conv layer
-    x = layers.BatchNormalization()(x)
-
-    x = layers.Conv3D(filters=64, kernel_size=3, activation="relu")(x)
-    x = layers.MaxPool3D(pool_size=2)(x)
-    x = layers.BatchNormalization()(x)
-    # NOTE: UNCOMMENTED THIS LINE AS WE CAN HOPEFULLY UP THE COMPLEXITY NOW
-
-    x = layers.Conv3D(filters=128, kernel_size=3, activation="relu")(x) # Double the filters
-    x = layers.MaxPool3D(pool_size=2)(x)
-    x = layers.BatchNormalization()(x)
-
-    x = layers.Conv3D(filters=256, kernel_size=3, activation="relu")(x) # Double filters one more time
-    x = layers.MaxPool3D(pool_size=2)(x)
-    x = layers.BatchNormalization()(x)
-
-    x = layers.GlobalAveragePooling3D()(x)
-    x = layers.Dense(units=518, activation="relu")(x) # Implement a simple dense layer with double units
-    x = layers.Dropout(0.5)(x) # 50% seems like a good tried and true value
-
-    outputs = layers.Dense(units=classes, activation="softmax")(x) # Units = no of classes. Also softmax because we want that probability output
-
-    # Define the model.
-    model = keras.Model(inputs, outputs, name="3DCNN")
-
-    return model
-
-def gen_model_reg(width=128, height=128, depth=64): # Make sure defaults are equal to image resizing defaults
-    # Initial build version - no explicit Sequential definition
-    inputs = keras.Input((width, height, depth, 1)) # Added extra dimension in preprocessing to accomodate that 4th dim
-
-    # Contruction seems to be pretty much the same as if this was 2D. Kernal should default to 3,3,3
-    x = layers.Conv3D(filters=64, kernel_size=3, activation="relu")(inputs) # Layer 1: Usual 64 filter start
-    x = layers.MaxPool3D(pool_size=2)(x) # Usually max pool after the conv layer
-    x = layers.BatchNormalization()(x)
-
-    x = layers.Conv3D(filters=64, kernel_size=3, activation="relu")(x)
-    x = layers.MaxPool3D(pool_size=2)(x)
-    x = layers.BatchNormalization()(x)
-    # NOTE: UNCOMMENTED THIS LINE AS WE CAN HOPEFULLY UP THE COMPLEXITY NOW
-
-    x = layers.Conv3D(filters=128, kernel_size=3, activation="relu")(x) # Double the filters
-    x = layers.MaxPool3D(pool_size=2)(x)
-    x = layers.BatchNormalization()(x)
-
-    x = layers.Conv3D(filters=256, kernel_size=3, activation="relu")(x) # Double filters one more time
-    x = layers.MaxPool3D(pool_size=2)(x)
-    x = layers.BatchNormalization()(x)
-
-    x = layers.GlobalAveragePooling3D()(x)
-    x = layers.Dense(units=512, activation="relu")(x) # Implement a simple dense layer with double units
-    x = layers.Dropout(0.5)(x) # 50% seems like a good tried and true value
-
-    outputs = layers.Dense(units=1)(x) # Regression needs no activation function?
-
-    # Define the model.
-    model = keras.Model(inputs, outputs, name="3DCNN_Reg")
-
-    return model
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# Are we in testing mode?
+testing_mode = False
+memory_mode = False
+modelname = "ADModel_NEO_v1.2_EXPERIMENTAL"
+logname = "Neo_V1.2_EXPERIMENTAL"
 
 # Model hyperparameters
 if testing_mode:
-    epochs = 2 #Small for testing purposes
-    batches = 3
+    epochs = 1 #Small for testing purposes
+    batches = 2
 else:
-    epochs = 30
-    batches = 8 # Going to need to fiddle with this over time (balance time save vs. running out of memory)
+    epochs = 1 # JUST FOR NOW
+    batches = 1 # Going to need to fiddle with this over time (balance time save vs. running out of memory)
+
+# Define image size (lower image resolution in order to speed up for broad testing)
+if testing_mode:
+    scale = 1.5
+else:
+    scale = 1 # For now
+w = int(208/scale)
+h = int(240/scale)
+d = int(256/scale)
+
+# Prepare parameters for fetching the data
+modo = 1 # 1 for CN/MCI, 2 for CN/AD, 3 for CN/MCI/AD
+if modo == 3:
+    classNo = 3 # Expected value
+else:
+    classNo = 2 # Expected value
+if testing_mode:
+	filename = ("Directories/test_adni_" + str(modo))
+else:
+	filename = ("Directories/adni_" + str(modo))
+if testing_mode:
+    print("TEST MODE ENABLED.")
+print("Filepath is", filename)
+imgname = filename + "_images.txt"
+labname = filename + "_labels.txt"
+
+# Grab the data
+path_file = open(imgname, "r")
+path = path_file.read()
+path = path.split("\n")
+path_file.close()
+label_file = open(labname, 'r')
+labels = label_file.read()
+labels = labels.split("\n")
+labels = [ int(i) for i in labels]
+label_file.close()
+
+print("\nOBTAINED DATA. (Scaling by a factor of ", scale, ")", sep='')
+
+# Split data
+if testing_mode:
+    x_train, x_val, y_train, y_val = train_test_split(path, labels, test_size=0.5, stratify=labels, shuffle=True) # 50/50 (for eventual 50/25/25)
+else:
+    x_train, x_val, y_train, y_val = train_test_split(path, labels, stratify=labels, shuffle=True) # Defaulting to 75 train, 25 val/test. Also shuffle=true and stratifytrue.
+if testing_mode:
+    x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, test_size=0.5) # Don't stratify test data, and just split 50/50.
+else:
+    x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, test_size=0.2) # 70/30 val/test
+
+if not testing_mode:
+    np.savez_compressed('testing_sub', a=x_test, b=y_test)
+
+print("Number of training images:", len(x_train))
+print("Training distribution:", Counter(y_train))
+#y_train = np.asarray(y_train)
+if testing_mode:
+    print("Training labels:", y_train)
+print("Number of validation images:", len(x_val))
+print("Validation distribution:", Counter(y_val))
+print("Number of testing images:", len(x_test))
+print("Testing distribution:", Counter(y_test), "\n")
+
+# Memory
+if memory_mode:
+    latest_gpu_memory = gpu_memory_usage(gpu_id)
+    print(f"Post data aquisition (GPU) Memory used: {latest_gpu_memory - initial_memory_usage} MiB")
 
 # Data augmentation functions
+@tf.function
 def rotate(image):
     def scipy_rotate(image): # Rotate by random angular amount
         # define some rotation angles
         angles = [-5, -3, -2, -1, 0, 0, 1, 2, 3, 5]
+        # pick angles at random
+        angle = random.choice(angles)
+        # rotate image
+        image = ndimage.rotate(image, angle, reshape=False)
+        image[image < 0] = 0
+        image[image > 1] = 1
+        '''
+        # define some rotation angles
+        angles = [-20, -10, -5, 0, 0, 5, 10, 20]
         # Pick angel at random
         angle = random.choice(angles)
         # Rotate on x axis
@@ -270,6 +163,8 @@ def rotate(image):
         image_final[image_final < 0] = 0
         image_final[image_final > 1] = 1
         return image_final
+        '''
+        return image
 
     augmented_image = tf.numpy_function(scipy_rotate, [image], tf.float32)
     return augmented_image
@@ -288,163 +183,233 @@ def shift(image):
     augmented_image = tf.numpy_function(scipy_shift, [image], tf.float32)
     return augmented_image
 
+def get_augmentation(patch_size):
+    return Compose([
+        Rotate((-3, 3), (-3, 3), (-3, 3), p=0.5),
+        #Flip(2, p=1)
+        ElasticTransform((0, 0.15), interpolation=2, p=0.1),
+        #GaussianNoise(var_limit=(0, 5), p=0.5),
+        RandomGamma(gamma_limit=(0.2, 1), p=0.4)
+    ], p=0.7)
+aug = get_augmentation((w,h,d)) # For augmentations
 
 
 
+def load_image(file, label):
+    
+    #print("Doing map stuff.")
+    loc = file.numpy().decode('utf-8')
+    #label = label.numpy().decode('utf-8')
+    #label = int(label)
+    nifti = np.asarray(nib.load(loc).get_fdata())
+    nifti = ne.organiseADNI(nifti, w, h, d)
+    '''
+    znum = 0 # Random variable to assist in saving augmentation test images
+    while os.path.exists("zaug_before_%s.jpg" % znum):
+        znum += 1
+    plt.imshow(nifti[:,:,(int)(d/2)], cmap='bone')
+    plt.savefig("zaug_before_%s.jpg" % znum)
+    '''
+    # Augmentation
+    data = {'image': nifti}
+    aug_data = aug(**data)
+    nifti = aug_data['image']
+    '''
+    plt.imshow(nifti[:,:,(int)(d/2)], cmap='bone')
+    plt.savefig("zaug_after_%s.jpg" % znum)
+    znum += 1
+    '''
+    nifti = tf.convert_to_tensor(nifti, np.float64)
+    #label.set_shape([1]) # For the you-know-what
+    return nifti, label
 
+def load_test(file):
+    loc = file.numpy().decode('utf-8')
+    nifti = np.asarray(nib.load(loc).get_fdata())
+    nifti = ne.organiseADNI(nifti, w, h, d)
+    nifti = tf.convert_to_tensor(nifti, np.float64)
+    return nifti
 
+def load_image_wrapper(file, labels):
+    return tf.py_function(load_image, [file, labels], [np.float64, tf.int32])
 
+def load_image_testing(file):
+    return tf.py_function(load_test, [file], [np.float64])
 
+# This needs to exist in order to allow for us to use an accuracy metric without getting weird errors
+def fix_shape(images, labels):
+    images.set_shape([None, w, h, d, 1])
+    labels.set_shape([1])
+    return images, labels
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-def train_preprocessing(image, label): # Only use for training, as it includes rotation augmentation
-    # Rotate image
-    #image = rotate(image)
-    # Shift image?
-    image = shift(image)
-    image = tf.expand_dims(image, axis=3)
-    return image, label
-
-def validation_preprocessing(image, label): # Can be used for val or test data (just ensures the dimensions are ok for the model)
-    """Process validation data by only adding a channel."""
-    image = tf.expand_dims(image, axis=3)
-    return image, label
-
-# Augment data, as well expand dimensions to make the training model accept it (by adding a 4th dimension)
-train_loader = tf.data.Dataset.from_tensor_slices((x_train, y_train))
-validation_loader = tf.data.Dataset.from_tensor_slices((x_val, y_val))
+print("Setting up dataloaders...")
+# TO-DO: Augmentation stuff
 batch_size = batches
-# Augment the on the fly during training.
+# Data loaders
+train = tf.data.Dataset.from_tensor_slices((x_train, y_train))
+val = tf.data.Dataset.from_tensor_slices((x_val, y_val))
+
 train_set = (
-    train_loader.shuffle(len(x_train))
-    .map(train_preprocessing)
+    train.shuffle(len(train))
+    .map(load_image_wrapper)
     .batch(batch_size)
+    #.map(fix_shape)
     .prefetch(batch_size)
 )
 # Only rescale.
 validation_set = (
-    validation_loader.shuffle(len(x_val))
-    .map(validation_preprocessing)
+    val.shuffle(len(x_val))
+    .map(load_image_wrapper)
     .batch(batch_size)
+    #.map(fix_shape)
     .prefetch(batch_size)
 )
 
+# Model architecture go here
+# For consideration: https://www.frontiersin.org/articles/10.3389/fbioe.2020.534592/full#B22
+# Current inspiration: https://ieeexplore.ieee.org/document/7780459 (VGG19)
+def gen_model(width=208, height=240, depth=256, classes=3): # Make sure defaults are equal to image resizing defaults
+    # Initial build version - no explicit Sequential definition
+    inputs = keras.Input((width, height, depth, 1)) # Added extra dimension in preprocessing to accomodate that 4th dim
+
+    x = layers.Conv3D(filters=32, kernel_size=7, strides=2, activation="relu")(inputs)
+    #x = layers.MaxPool3D(pool_size=2)(x)
+
+    # Contruction seems to be pretty much the same as if this was 2D. Kernal should default to 5,5,5
+    x = layers.Conv3D(filters=32, kernel_size=3, activation="relu")(x) # Layer 1: Simple 32 node start
+    x = layers.Conv3D(filters=32, kernel_size=3, activation="relu")(x)
+    x = layers.MaxPool3D(pool_size=2)(x) # Usually max pool after the conv layer
+    #x = layers.BatchNormalization()(x)
+
+    # Doing this for now to test some things
+    x = layers.Conv3D(filters=64, kernel_size=3, activation="relu")(x)
+    x = layers.Conv3D(filters=64, kernel_size=3, activation="relu")(x)
+    x = layers.MaxPool3D(pool_size=2)(x)
+    #x = layers.BatchNormalization()(x)
+    # NOTE: Using it again, let's see how this goes
+
+    x = layers.Conv3D(filters=128, kernel_size=3, activation="relu")(x) # Double the filters
+    x = layers.Conv3D(filters=128, kernel_size=3, activation="relu")(x) # Double filters one more time
+    x = layers.Conv3D(filters=128, kernel_size=3, activation="relu")(x)
+    x = layers.MaxPool3D(pool_size=3)(x) # Pool size 3 cause I dunno, it makes the Flatten layer less intense
+    #x = layers.BatchNormalization()(x)
+    # NOTE: Also commented this one for - we MINIMAL rn
+
+    #x = layers.GlobalAveragePooling3D()(x)
+    x = layers.Flatten()(x)
+    x = layers.Dense(units=256, activation="relu")(x) # Implement a simple dense layer with double units
+    x = layers.Dropout(0.5)(x) # Start low, and work up if overfitting seems to be present
+
+    outputs = layers.Dense(units=1, activation="sigmoid")(x) # units = 1 FOR NOW
+    # Ok so this needs to be tuned carefully based on what we're trying to do
+    # General consensus for binary classification is units=1, activation=sigmoid, then use binary shit
+
+    # Define the model.
+    model = keras.Model(inputs, outputs, name="3DCNN")
+
+    return model
+
 # Build model.
-if classmode:
-    model = gen_model(width=128, height=128, depth=64, classes=classNo)
-else:
-    model = gen_model_reg(width=128, height=128, depth=64)
+model = gen_model(width=w, height=h, depth=d, classes=classNo)
 model.summary()
-optim = keras.optimizers.Adam(learning_rate=0.001) # LR chosen based on principle but double-check this later
-# Note: These things will have to change if this is changed into a regression model
-#model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accuracy']) # Categorical loss since there are move than 2 classes.
-if classmode:
-    model.compile(optimizer=optim, loss='binary_crossentropy', metrics=['accuracy']) # Temp binary for only two classes
-else:
-    model.compile(optimizer=optim, loss= "mean_squared_error", metrics=["mean_squared_error"]) # Regression compiler
+optim = keras.optimizers.Adam(learning_rate=1e-3, epsilon=1e-3) # LR chosen based on principle but double-check this later
+#model.compile(optimizer=optim, loss='binary_crossentropy', metrics=['accuracy']) # Temp binary for only two classes
+model.compile(optimizer=optim, loss='binary_crossentropy', metrics=[tf.keras.metrics.BinaryAccuracy()])
+# ^^^^ Temp solution for the ol' "as_list() is not defined on an unknown TensorShape issue"
+# NOTE: LOOK AT THIS AGAIN WHEN DOING 3-WAY CLASS
 
-
-
-
-
-
-
-# Class weighting
-# Data distribution is {0: 2625, 1: 569, 2: 194}
-#class_weight = {0: 1., 1: 3., 2: 8.}
-class_weight = {0: 1., 1: 2.}
+# Memory
+if memory_mode:
+    latest_gpu_memory = gpu_memory_usage(gpu_id)
+    print(f"Pre train (GPU) Memory used: {latest_gpu_memory - initial_memory_usage} MiB")
 
 # Checkpointing & Early Stopping
-es = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True)
-checkpointname = "weight_history.h5"
+es = EarlyStopping(monitor='val_loss', patience=30, restore_best_weights=False) # Temp at 30 to circumvent issue with first epoch behaving weirdly
+checkpointname = "neo_checkpoints.h5"
 if testing_mode:
-    checkpointname = "weight_history_testing.h5"
-mc = ModelCheckpoint(checkpointname, monitor='val_accuracy', mode='max', verbose=2, save_best_only=False) #Maybe change to true so we can more easily access the "best" epoch
+    checkpointname = "neo_checkpoints_testing.h5"
+mc = ModelCheckpoint(checkpointname, monitor='val_loss', mode='min', verbose=2, save_best_only=False) #Maybe change to true so we can more easily access the "best" epoch
 if testing_mode:
     log_dir = "/scratch/mssric004/test_logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 else:
     if logname != "na":
-        log_dir = "/scratch/mssric004/logs/fit/" + logname
+        log_dir = "/scratch/mssric004/logs/fit/" + logname + "_" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     else:
         log_dir = "/scratch/mssric004/logs/fit/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 tb = TensorBoard(log_dir=log_dir, histogram_freq=1)
 
-
-
-
-
-
-
-
-
 # Run the model
 print("Fitting model...")
-history = model.fit(train_set, validation_data=validation_set, batch_size=batches, epochs=epochs, shuffle=True, verbose=2, callbacks=[mc, tb, es], class_weight=class_weight)
-# Note: Add early stop back in at some point
-modelname = "ADModel_Alt"
+
 if testing_mode:
-    modelname = "ADModel_Testing"
+    #history = model.fit(x_train, y_train, validation_data=(x_val, y_val), batch_size=batches, epochs=epochs, verbose=0)
+    history = model.fit(train_set, validation_data=validation_set, epochs=epochs, verbose=0) # DON'T SPECIFY BATCH SIZE, CAUSE INPUT IS ALREADY A BATCHED DATASET
+else:
+    #history = model.fit(x_train, y_train, validation_data=(x_val, y_val), batch_size=batches, epochs=epochs, verbose=0, shuffle=True)
+    history = model.fit(train_set, validation_data=validation_set, epochs=epochs, callbacks=[mc, tb, es], verbose=0, shuffle=True)
+if testing_mode:
+    modelname = "ADModel_NEO_Testing"
+modelname = modelname +".h5"
 model.save(modelname)
 print(history.history)
-actual_epochs = len(history.history['val_loss'])
-print("Complete. Ran for ", actual_epochs, "/", epochs, " epochs.\nParameters saved to", modelname)
-for i in range(actual_epochs):
-    print("Epoch", i+1, ": Loss [", history.history['loss'][i], "] Val Loss [", history.history['val_loss'][i])
-best_epoch = np.argmin(history.history['val_loss']) + 1
-print("Epoch with lowest validation loss: Epoch", best_epoch, "[", history.history['loss'][best_epoch-1], "]")
 
-Y_test = np.argmax(y_test, axis=1)
-X_test = np.expand_dims(x_test, axis=-1)
-'''
-# Generate a classification matrix
-def classification_report_csv(report, filename):
-    report_data = []
-    lines = report.split('\n')
-    for line in lines[2:-3]:
-        row = {}
-        row_data = line.split('      ')
-        row['class'] = row_data[0]
-        row['precision'] = float(row_data[1])
-        row['recall'] = float(row_data[2])
-        row['f1_score'] = float(row_data[3])
-        row['support'] = float(row_data[4])
-        report_data.append(row)
-    dataframe = pd.DataFrame.from_dict(report_data)
-    dataframe.to_csv(filename, index = False)
-'''
-if classmode:
-    from sklearn.metrics import classification_report
-
-    print("Generating classification report...\n")
-    y_pred = model.predict(X_test, batch_size=2)
-    y_pred = np.argmax(y_pred, axis=1)
-    print("Actual test set:")
-    print(Y_test)
-    print("Predictions are  as follows:")
-    print(y_pred)
-    rep = classification_report(Y_test, y_pred)
-    print(rep)
+# Memory
+if memory_mode:
+    latest_gpu_memory = gpu_memory_usage(gpu_id)
+    print(f"Post train (GPU) Memory used: {latest_gpu_memory - initial_memory_usage} MiB")
 
 # Final evaluation
-score = model.evaluate(X_test, Y_test, verbose=0, batch_size=2)
-print("Evaluated scored:", score)
+print("\nEvaluating using test data...")
+
+# First prepare the test data
+test = tf.data.Dataset.from_tensor_slices((x_test, y_test))
+test_x = tf.data.Dataset.from_tensor_slices((x_test))
+print("Test data prepared.")
+test_set = (
+    test.map(load_image_wrapper)
+    .batch(batch_size)
+    .prefetch(batch_size)
+) # Later we may need to use a different wrapper function? Not sure.
+
+test_set_x = (
+    test_x.map(load_image_testing)
+    .batch(batch_size)
+    .prefetch(batch_size)
+)
+
+try:
+    scores = model.evaluate(test_set, verbose=0) # Should not need to specify batch size, because of set
+    acc = scores[1]*100
+    loss = scores[0]
+    print("Evaluated scores - Acc:", acc, "Loss:", loss)
+except:
+    print("Error occured during evaluation. Isn't this weird?\nTest set labels are:", y_test)
+
+#if not testing_mode: # NEED TO REWORK THIS
+from sklearn.metrics import classification_report
+
+print("\nGenerating classification report...")
+try:
+    y_pred = model.predict(test_set_x, verbose=0)
+    y_pred = np.argmax(y_pred, axis=1)
+    #print("test:", y_test)
+    print("pred:", y_pred)
+    #print("\nand now we crash")
+    #y_test = np.argmax(y_test, axis=1)
+    rep = classification_report(y_test, y_pred)
+    print(rep)
+    limit = min(20, len(y_test))
+    print("\nActual test set (first ", (limit+1), "):", sep='')
+    print(y_test[:limit])
+    print("Predictions are  as follows (first ", (limit+1), "):", sep='')
+    print(y_pred[:limit])
+except:
+    print("Error occured in classification report (ie. predict).\nTest set labels are:", y_test)
+
+# Memory
+if memory_mode:
+    latest_gpu_memory = gpu_memory_usage(gpu_id)
+    print(f"Post evaluation (GPU) Memory used: {latest_gpu_memory - initial_memory_usage} MiB")
 
 print("Done.")
+

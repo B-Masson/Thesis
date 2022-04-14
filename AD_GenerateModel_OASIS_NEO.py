@@ -1,10 +1,11 @@
-# Sleek, refined, no chaff. This is AD training at its perfect form.
+# Sleek, refined, no chaff. This is AD training at its perfect form. Also Oasis.
 # Richard Masson
 # Info: Going back to basics and trying a version of the code with less stuff going on.
 # Last use in 2021: October 29th
 print("IMPLEMENTATION: NEO OASIS")
-print("CURRENT TEST: OASIS Dataset, can it save us?")
+print("CURRENT TEST: OASIS Dataset. Trying to get it to predict properly.")
 import os
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 from nibabel import test
 import NIFTI_Engine as ne
@@ -13,20 +14,23 @@ import numpy as np
 import random
 from sklearn.model_selection import train_test_split
 import tensorflow as tf
-print("TF Version:", tf.version.VERSION)
+#print("TF Version:", tf.version.VERSION)
 from scipy import ndimage
 from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow.python.keras.callbacks import EarlyStopping, ModelCheckpoint, TensorBoard
 from matplotlib import pyplot as plt
 import random
-import datetime
 from collections import Counter
+import sys
 
 # Attempt to better allocate memory.
 gpus = tf.config.experimental.list_physical_devices('GPU')
 for gpu in gpus:
   tf.config.experimental.set_memory_growth(gpu, True)
+
+from datetime import date
+print("Today's date:", date.today())
 
 # Are we in testing mode?
 testing_mode = False
@@ -85,10 +89,10 @@ def genClassLabels(scan_meta):
     print("There are", classNo, "unique classes. ->", np.unique(y_arr), "in the dataset.")
     classCount = Counter(y_arr)
     print("Class count:", classCount)
-    y_arr = tf.keras.utils.to_categorical(y_arr)
+    #y_arr = tf.keras.utils.to_categorical(y_arr) # <---------- CHANGE MADE HERE
     return y_arr, classNo
 
-#y_arr, classNo = genClassLabels(scan_meta)
+y_arr, classNo = genClassLabels(scan_meta)
 #unique, counts = np.unique(y_arr, return_counts=True)
 #print(dict(zip(unique, counts)))
 
@@ -105,11 +109,15 @@ if not testing_mode:
 x_train = np.asarray(x_train)
 print("Shape of training data:", np.shape(x_train))
 y_train = np.asarray(y_train)
-print("Training labels:", y_train)
+print("Training distribution:", Counter(y_train))
+#if testing_mode:
+    #print("Training labels:", np.argmax(y_train, axis=1)) # <---------- CHANGE MADE HERE
+    #print("Training labels:", y_train)
 x_val = np.asarray(x_val)
 print("Shape of validation labels:", np.shape(x_val))
 y_val = np.asarray(y_val)
-print("Validation labels:", y_val)
+print("Validation distribution:", Counter(y_val))
+#print("Validation labels:", y_val)
 
 # Model architecture go here
 def gen_model(width=208, height=240, depth=256, classes=3): # Make sure defaults are equal to image resizing defaults
@@ -121,21 +129,21 @@ def gen_model(width=208, height=240, depth=256, classes=3): # Make sure defaults
     x = layers.MaxPool3D(pool_size=2)(x) # Usually max pool after the conv layer
     x = layers.BatchNormalization()(x)
 
-    #x = layers.Conv3D(filters=64, kernel_size=3, activation="relu")(x)
-    #x = layers.MaxPool3D(pool_size=2)(x)
-    #x = layers.BatchNormalization()(x)
+    x = layers.Conv3D(filters=64, kernel_size=5, activation="relu")(x)
+    x = layers.MaxPool3D(pool_size=2)(x)
+    x = layers.BatchNormalization()(x) # Batch out
     # NOTE: RECOMMENTED LOL
 
-    x = layers.Conv3D(filters=64, kernel_size=5, activation="relu")(x) # Double the filters
-    x = layers.MaxPool3D(pool_size=2)(x)
-    x = layers.BatchNormalization()(x)
+    x = layers.Conv3D(filters=64, kernel_size=5, activation="relu", padding="same")(x) # Double the filters
+    x = layers.MaxPool3D(pool_size=2, padding="same")(x)
+    x = layers.BatchNormalization()(x) # Batch out
 
-    #x = layers.Conv3D(filters=256, kernel_size=3, activation="relu")(x) # Double filters one more time
-    #x = layers.MaxPool3D(pool_size=2)(x)
-    #x = layers.BatchNormalization()(x)
+    x = layers.Conv3D(filters=128, kernel_size=5, activation="relu", padding="same")(x) # Double filters one more time
+    x = layers.MaxPool3D(pool_size=2, padding="same")(x) # Alsp added all these padding lines to everything to try fix an error
+    x = layers.BatchNormalization()(x)
     # NOTE: Also commented this one for - we MINIMAL rn
 
-    x = layers.GlobalAveragePooling3D()(x)
+    x = layers.GlobalAveragePooling3D()(x) # 
     x = layers.Dense(units=128, activation="relu")(x) # Implement a simple dense layer with double units
     x = layers.Dropout(0.2)(x) # Start low, and work up if overfitting seems to be present
 
@@ -153,23 +161,28 @@ optim = keras.optimizers.Adam(learning_rate=0.001) # LR chosen based on principl
 model.compile(optimizer=optim, loss='binary_crossentropy', metrics=['accuracy']) # Temp binary for only two classes
 # NOTE: LOOK AT THIS AGAIN WHEN DOING 3-WAY CLASS
 
+# Additional params
+class_weight = {0: 1., 1: 3.}
+
 # Run the model
 print("Fitting model...")
 
 if testing_mode:
     history = model.fit(x_train, y_train, validation_data=(x_val, y_val), batch_size=batches, epochs=epochs, verbose=0)
 else:
-    history = model.fit(x_train, y_train, validation_data=(x_val, y_val), batch_size=batches, epochs=epochs, verbose=0, shuffle=True)
+    history = model.fit(x_train, y_train, validation_data=(x_val, y_val), batch_size=batches, epochs=epochs, verbose=0, class_weight=class_weight, shuffle=True)
 if testing_mode:
     modelname = "ADModel_OASIS_Testing"
 #model.save(modelname)
-model.save("oasis_weights.h5")
+modelname = modelname +".h5"
+model.save(modelname)
 print(history.history)
 
 # Final evaluation
 print("\nEvaluating using test data...")
 print("Testing data shape:", np.shape(x_test))
-print("Testing labels:", y_test)
+#if testing_mode:
+#    print("Testing labels:", y_test)
 x_test = np.asarray(x_test)
 y_test = np.asarray(y_test)
 scores = model.evaluate(x_test, y_test, batch_size=1, verbose=0)
@@ -177,16 +190,19 @@ acc = scores[1]*100
 loss = scores[0]
 print("Evaluated scores - Acc:", acc, "Loss:", loss)
 
+#if not testing_mode:
 from sklearn.metrics import classification_report
 
 print("\nGenerating classification report...")
-y_pred = model.predict(x_test, batch_size=1)
+y_pred = model.predict(x_test, batch_size=1, verbose=0)
 y_pred = np.argmax(y_pred, axis=1)
+#y_test = np.argmax(y_test, axis=1) # <---------- CHANGE MADE HERE
 rep = classification_report(y_test, y_pred)
 print(rep)
-print("\nActual test set:")
-print(y_test)
-print("Predictions are  as follows:")
-print(y_pred)
+limit = min(20, len(y_test))
+print("\nActual test set (first ", (limit+1), "):", sep='')
+print(y_test[:limit])
+print("Predictions are  as follows (first ", (limit+1), "):", sep='')
+print(y_pred[:limit])
 
 print("Done.")
