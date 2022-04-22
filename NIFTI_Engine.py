@@ -1,16 +1,20 @@
 # Host of functions for use in data collection and pre-processing for the brain scans
 # Richard Masson
+print("Importing NIFTI engine stuff...")
 import numpy as np
 import skimage, os
 import os.path as op
 #import scipy.misc
 from skimage.io import imread
 import nibabel as nib
-import matplotlib.pyplot as plt
+#%matplotlib tk
+#import matplotlib.pyplot as plt
+#print("Imported matplotlib.")
 from scipy import ndimage
-from tqdm import tqdm
+#from tqdm import tqdm
 from time import sleep
 import tensorflow as tf
+print("Engine loaded.")
 
 # Function: Run through an entire data folder and extract all data of a certain scan type. Graps NIFTI data and returns numpy arrays for the x-array
 # Also returns an an array alongside with the patient ID and the day of the MRI
@@ -36,6 +40,7 @@ def extractArrays(scantype, w, h, d, orientation=0, root="C:\\Users\\richa\\Docu
                     scan_array.append(image_data)
                     meta_segments = sample.split("_")
                     meta_array.append({'ID': meta_segments[0], 'day': int(meta_segments[2][1:])})
+                    '''
                     try:
                         if orientation == 1:
                             plt.imshow(image_data[50,:,:], cmap='bone')
@@ -48,6 +53,7 @@ def extractArrays(scantype, w, h, d, orientation=0, root="C:\\Users\\richa\\Docu
                             plt.savefig("a_sample_3.png")
                     except TypeError as e:
                         print("Cannot display example slices:", e)
+                    '''
         elif scantype in os.listdir(op.join(root, sample)): # This needs to be cleaned up and incorporated into the above at some point, to reduce redundant code
             root_niftis = op.join(root, sample, scantype)
             check_niftis = os.listdir(root_niftis)
@@ -60,6 +66,7 @@ def extractArrays(scantype, w, h, d, orientation=0, root="C:\\Users\\richa\\Docu
                 scan_array.append(image_data)
                 meta_segments = sample.split("_")
                 meta_array.append({'ID': meta_segments[0], 'day': int(meta_segments[2][1:])})
+                '''
                 try:
                     if orientation == 1:
                         plt.imshow(image_data[50,:,:], cmap='bone')
@@ -72,6 +79,7 @@ def extractArrays(scantype, w, h, d, orientation=0, root="C:\\Users\\richa\\Docu
                         plt.savefig("a_sample_3.png")
                 except TypeError as e:
                     print("Cannot display example slices:", e)
+                '''
             else: print("No NIFTI file found. This should not occur if the dataset is half-decent.")
         else:
             print("Warning:", sample, "does not possess data of type", scantype)
@@ -138,6 +146,7 @@ def extractADNI(w, h, d, orientation=0, root="C:\\Users\\richa\\Documents\\Uni\\
                                 else:
                                     Xcounter += 1
                             '''
+                            '''
                             try:
                                 if orientation == 1:
                                     plt.imshow(image_data[50,:,:], cmap='bone')
@@ -150,6 +159,7 @@ def extractADNI(w, h, d, orientation=0, root="C:\\Users\\richa\\Documents\\Uni\\
                                     plt.savefig("ADNI_3.png")
                             except TypeError as e:
                                 print("Cannot display example slices:", e)
+                            '''
                             class_array.append(classes)
     #print("Samples with the wrong data type: AD[", ADcounter, " ] Else[", Xcounter, " ]")
     return scan_array, label_array
@@ -281,7 +291,7 @@ def extractDirs(root, mode=3):
     #dataset = tf.data.Dataset.from_tensor_slices((scan_array, label_array))
     return dir_array, label_array
 
-
+# Extract a single raw image, for testing other functions
 def extractSingle(w, h, d, root, type):
     types = os.listdir(root)
     dates = os.listdir(op.join(root, types[0]))
@@ -303,18 +313,38 @@ def extractSingle(w, h, d, root, type):
         print("Incorrect class inputted.")
     return scan_array, label_array
 
+def extractSingleNib(root, type):
+    classdirs = os.listdir(root)
+    for classes in classdirs:
+        if classes == type:
+            print("Extracting from", classes, "folder.")
+            patients = os.listdir(op.join(root, classes))
+            print("Patients:", patients)
+            folders = os.listdir(op.join(root, classes, patients[0]))
+            print("Folders:", folders)
+            dates = os.listdir(op.join(root, classes, patients[0], folders[0]))
+            print("Dates:", dates)
+            images = os.listdir(op.join(root, classes, patients[0], folders[0], dates[0]))
+            print("Images:", images)
+            nifti = os.listdir(op.join(root, classes, patients[0], folders[0], dates[0], images[0]))
+            print("Nifti:", nifti)
+            true_root = op.join(root, classes, patients[0], folders[0], dates[0], images[0], nifti[0])
+            #print("Target:", true_root_more_true)
+            image_data_raw = nib.load(true_root)
+            return image_data_raw
+
 # Normalise pixel values to range from 0 to 1:
 # Need to run AD_MinMax to get min and max values.
-def normalize(image_data, min=0, max=4095):
+def normalize_notrim(image_data, min=0, max=4095):
+    image_data = image_data.astype("float32") # Changed from 32 # Then changed back?
     image_data = (image_data - min) / (max - min)
-    image_data = image_data.astype("float32") # Changed from 32
     return image_data
 
-def normalize_old(image_data, min=-1000, max=400):
+def normalize(image_data, min=0, max=400):
+    image_data = image_data.astype("float32") # Changed from 32
     image_data[image_data < min] = min
     image_data[image_data > max] = max
     image_data = (image_data - min) / (max - min)
-    image_data = image_data.astype("float32") # Changed from 32
     return image_data
 
 # Resize the data to some uniform amount so it actually fits into a training model
@@ -322,7 +352,7 @@ def resize(image_data, w=128, h=128, d=64):
     # Get current dimensions
     width = image_data.shape[0]
     height = image_data.shape[1]
-    depth = image_data.shape[-1]
+    depth = image_data.shape[2]
     # Compute all the factors that we need to scale the dimensions by
     width_factor = 1/(width/w)
     height_factor = 1/(height/h)

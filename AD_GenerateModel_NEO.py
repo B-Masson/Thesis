@@ -1,13 +1,14 @@
-# Messing around with stuff without breaking the original version of the code.
+# True NEO branch
 # Richard Masson
-# Info: Trying to fix the model since I'm convinced it's scuffed.
+# Info: Main branch of code where all the tried and true stuff lives
 # Last use in 2021: October 29th
 print("\nIMPLEMENTATION: NEO")
-print("CURRENT TEST: Augmentation, slightly better model, etc.")
-# TO DO: Implement augmentations. Elastic deformation and intensity control are top contenders.
+print("CURRENT TEST: Testing effects of switching to categorical softmax")
+# TO DO: Reimplement augmentations.
 import os
 import subprocess as sp # Memory shit
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
+import sys
 import nibabel as nib
 import NIFTI_Engine as ne
 import numpy as np
@@ -19,11 +20,12 @@ from scipy import ndimage
 from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow.python.keras.callbacks import EarlyStopping, ModelCheckpoint, TensorBoard
-from matplotlib import pyplot as plt
+from tensorflow.keras.utils import to_categorical
+#from matplotlib import pyplot as plt
+print("WHY IS MATPLOT BROKEN")
 import random
 import datetime
 from collections import Counter
-import sys
 from volumentations import * # OI, WE NEED TO CITE VOLUMENTATIONS NOW
 print("Imports working.")
 
@@ -57,20 +59,20 @@ print("Today's date:", date.today())
 # Are we in testing mode?
 testing_mode = False
 memory_mode = False
-modelname = "ADModel_NEO_v1.2"
-logname = "Neo_V1.2"
+modelname = "ADModel_NEO_v1.3" #Next in line: ADMODEL_NEO_v1.3
+logname = "Neo_V1.3" #Neo_V1.3
 
 # Model hyperparameters
 if testing_mode:
-    epochs = 1 #Small for testing purposes
-    batches = 2
+    epochs = 5 #Small for testing purposes
+    batches = 1
 else:
     epochs = 15 # JUST FOR NOW
     batches = 1 # Going to need to fiddle with this over time (balance time save vs. running out of memory)
 
 # Define image size (lower image resolution in order to speed up for broad testing)
 if testing_mode:
-    scale = 1.5
+    scale = 2
 else:
     scale = 1 # For now
 w = int(208/scale)
@@ -78,15 +80,21 @@ h = int(240/scale)
 d = int(256/scale)
 
 # Prepare parameters for fetching the data
-modo = 1 # 1 for CN/MCI, 2 for CN/AD, 3 for CN/MCI/AD
-if modo == 3:
+modo = 1 # 1 for CN/MCI, 2 for CN/AD, 3 for CN/MCI/AD, 4 for weird AD-only, 5 for MCI-only
+if modo == 3 or modo == 4:
+    print("Setting for 3 classes")
     classNo = 3 # Expected value
 else:
+    print("Setting for 2 classes")
     classNo = 2 # Expected value
-if testing_mode:
+#if modo == 4: # Very scuffed, just for now
+#    filename = ("Directories/adni_4")
+#elif modo == 5:
+#    filename = ("Directories/adni_5")
+if testing_mode: # CHANGIN THINGS UP
 	filename = ("Directories/test_adni_" + str(modo))
 else:
-	filename = ("Directories/adni_" + str(modo))
+    filename = ("Directories/adni_" + str(modo))
 if testing_mode:
     print("TEST MODE ENABLED.")
 print("Filepath is", filename)
@@ -103,6 +111,16 @@ labels = label_file.read()
 labels = labels.split("\n")
 labels = [ int(i) for i in labels]
 label_file.close()
+print("Data distribution:", Counter(labels))
+print("ClassNo:", classNo)
+labels = to_categorical(labels, num_classes=classNo, dtype='float32')
+'''
+if modo == 4 or modo == 5: # Remove this later
+    if testing_mode:
+        path = path[:15] # Forcibly trim the samples to a smaller amount (just while we don't have a working Test_AD)
+        labels = labels[:15]
+'''
+print("Categorical shape:", labels[0].shape)
 
 print("\nOBTAINED DATA. (Scaling by a factor of ", scale, ")", sep='')
 
@@ -120,14 +138,13 @@ if not testing_mode:
     np.savez_compressed('testing_sub', a=x_test, b=y_test)
 
 print("Number of training images:", len(x_train))
-print("Training distribution:", Counter(y_train))
 #y_train = np.asarray(y_train)
+print("Number of validation images:", len(x_val))
+#print("Validation distribution:", Counter(y_val))
+print("Number of testing images:", len(x_test), "\n")
+#print("Testing distribution:", Counter(y_test), "\n")
 if testing_mode:
     print("Training labels:", y_train)
-print("Number of validation images:", len(x_val))
-print("Validation distribution:", Counter(y_val))
-print("Number of testing images:", len(x_test))
-print("Testing distribution:", Counter(y_test), "\n")
 
 # Memory
 if memory_mode:
@@ -185,40 +202,24 @@ def shift(image):
 
 def get_augmentation(patch_size):
     return Compose([
-        Rotate((-3, 3), (-3, 3), (-3, 3), p=0.5),
+        Rotate((-3, 3), (-3, 3), (-3, 3), p=0.5), #0.5
         #Flip(2, p=1)
-        ElasticTransform((0, 0.15), interpolation=2, p=0.1),
+        ElasticTransform((0, 0.15), interpolation=2, p=0.1), #0.1
         #GaussianNoise(var_limit=(0, 5), p=0.5),
-        RandomGamma(gamma_limit=(0.2, 1), p=0.4)
-    ], p=0.7)
+        RandomGamma(gamma_limit=(0.2, 1), p=0.4) #0.4
+    ], p=0) #0.7? #NOTE: Temp not doing augmentation. Want to take time to observe the effects of this stuff
 aug = get_augmentation((w,h,d)) # For augmentations
 
-
-
 def load_image(file, label):
-    
-    #print("Doing map stuff.")
     loc = file.numpy().decode('utf-8')
-    #label = label.numpy().decode('utf-8')
-    #label = int(label)
     nifti = np.asarray(nib.load(loc).get_fdata())
     nifti = ne.organiseADNI(nifti, w, h, d)
-    '''
-    znum = 0 # Random variable to assist in saving augmentation test images
-    while os.path.exists("zaug_before_%s.jpg" % znum):
-        znum += 1
-    plt.imshow(nifti[:,:,(int)(d/2)], cmap='bone')
-    plt.savefig("zaug_before_%s.jpg" % znum)
-    '''
+
     # Augmentation
     data = {'image': nifti}
     aug_data = aug(**data)
     nifti = aug_data['image']
-    '''
-    plt.imshow(nifti[:,:,(int)(d/2)], cmap='bone')
-    plt.savefig("zaug_after_%s.jpg" % znum)
-    znum += 1
-    '''
+
     nifti = tf.convert_to_tensor(nifti, np.float64)
     #label.set_shape([1]) # For the you-know-what
     return nifti, label
@@ -231,7 +232,7 @@ def load_test(file):
     return nifti
 
 def load_image_wrapper(file, labels):
-    return tf.py_function(load_image, [file, labels], [np.float64, tf.int32])
+    return tf.py_function(load_image, [file, labels], [np.float64, tf.float32])
 
 def load_image_testing(file):
     return tf.py_function(load_test, [file], [np.float64])
@@ -239,7 +240,7 @@ def load_image_testing(file):
 # This needs to exist in order to allow for us to use an accuracy metric without getting weird errors
 def fix_shape(images, labels):
     images.set_shape([None, w, h, d, 1])
-    labels.set_shape([1])
+    labels.set_shape([1, classNo])
     return images, labels
 
 print("Setting up dataloaders...")
@@ -253,7 +254,7 @@ train_set = (
     train.shuffle(len(train))
     .map(load_image_wrapper)
     .batch(batch_size)
-    #.map(fix_shape)
+    .map(fix_shape)
     .prefetch(batch_size)
 )
 # Only rescale.
@@ -261,7 +262,7 @@ validation_set = (
     val.shuffle(len(x_val))
     .map(load_image_wrapper)
     .batch(batch_size)
-    #.map(fix_shape)
+    .map(fix_shape)
     .prefetch(batch_size)
 )
 
@@ -272,29 +273,32 @@ def gen_model(width=208, height=240, depth=256, classes=3): # Make sure defaults
     inputs = keras.Input((width, height, depth, 1)) # Added extra dimension in preprocessing to accomodate that 4th dim
 
     # Contruction seems to be pretty much the same as if this was 2D. Kernal should default to 5,5,5
-    x = layers.Conv3D(filters=32, kernel_size=5, activation="relu")(inputs) # Layer 1: Simple 32 node start
-    x = layers.MaxPool3D(pool_size=2)(x) # Usually max pool after the conv layer
-    x = layers.BatchNormalization()(x)
+    x = layers.Conv3D(filters=32, kernel_size=3, padding='valid', activation="relu")(inputs) # Layer 1: Simple 32 node start
+    x = layers.MaxPool3D(pool_size=2, strides=2)(x) # Usually max pool after the conv layer
+    x = layers.BatchNormalization()(x) # Do we bother with this?
+    #x = layers.Dropout(0.1)(x) # Apparently there's merit to very light dropout after each conv layer
 
-    x = layers.Conv3D(filters=64, kernel_size=3, activation="relu")(x)
-    x = layers.MaxPool3D(pool_size=2)(x)
+    x = layers.Conv3D(filters=64, kernel_size=3, padding='valid', activation="relu")(x)
+    x = layers.MaxPool3D(pool_size=2, strides=2)(x)
     x = layers.BatchNormalization()(x)
     # NOTE: RECOMMENTED LOL
 
-    x = layers.Conv3D(filters=64, kernel_size=5, activation="relu")(x) # Double the filters
-    x = layers.MaxPool3D(pool_size=2)(x)
+    x = layers.Conv3D(filters=64, kernel_size=3, padding='valid', activation="relu")(x) # Double the filters
+    x = layers.MaxPool3D(pool_size=2, strides=2)(x)
     x = layers.BatchNormalization()(x)
 
-    x = layers.Conv3D(filters=128, kernel_size=3, activation="relu")(x) # Double filters one more time
-    x = layers.MaxPool3D(pool_size=2)(x)
+    x = layers.Conv3D(filters=128, kernel_size=3, padding='valid', activation="relu")(x) # Double filters one more time
+    x = layers.MaxPool3D(pool_size=3, strides=2)(x)
     x = layers.BatchNormalization()(x)
     # NOTE: Also commented this one for - we MINIMAL rn
 
-    x = layers.GlobalAveragePooling3D()(x)
+    #x = layers.GlobalAveragePooling3D()(x)
+    #x = layers.Dropout(0.5)(x) # Here or below?
+    x = layers.Flatten()(x)
     x = layers.Dense(units=128, activation="relu")(x) # Implement a simple dense layer with double units
     x = layers.Dropout(0.5)(x) # Start low, and work up if overfitting seems to be present
 
-    outputs = layers.Dense(units=1, activation="sigmoid")(x) # Units = no of classes. Also softmax because we want that probability output
+    outputs = layers.Dense(units=classNo, activation="softmax")(x) # Units = no of classes. Also softmax because we want that probability output
 
     # Define the model.
     model = keras.Model(inputs, outputs, name="3DCNN")
@@ -304,9 +308,9 @@ def gen_model(width=208, height=240, depth=256, classes=3): # Make sure defaults
 # Build model.
 model = gen_model(width=w, height=h, depth=d, classes=classNo)
 model.summary()
-optim = keras.optimizers.Adam(learning_rate=1e-3, epsilon=1e-3) # LR chosen based on principle but double-check this later
+optim = keras.optimizers.Adam(learning_rate=0.001, epsilon=1e-3) # LR chosen based on principle but double-check this later
 #model.compile(optimizer=optim, loss='binary_crossentropy', metrics=['accuracy']) # Temp binary for only two classes
-model.compile(optimizer=optim, loss='binary_crossentropy', metrics=[tf.keras.metrics.BinaryAccuracy()])
+model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accuracy']) #metrics=[tf.keras.metrics.BinaryAccuracy()]
 # ^^^^ Temp solution for the ol' "as_list() is not defined on an unknown TensorShape issue"
 # NOTE: LOOK AT THIS AGAIN WHEN DOING 3-WAY CLASS
 
@@ -383,11 +387,12 @@ from sklearn.metrics import classification_report
 print("\nGenerating classification report...")
 try:
     y_pred = model.predict(test_set_x, verbose=0)
+    print("Before argmax:", y_pred)
     y_pred = np.argmax(y_pred, axis=1)
     #print("test:", y_test)
-    print("pred:", y_pred)
+    print("Argmax pred:", y_pred)
     #print("\nand now we crash")
-    #y_test = np.argmax(y_test, axis=1)
+    y_test = np.argmax(y_test, axis=1)
     rep = classification_report(y_test, y_pred)
     print(rep)
     limit = min(20, len(y_test))
@@ -396,7 +401,7 @@ try:
     print("Predictions are  as follows (first ", (limit+1), "):", sep='')
     print(y_pred[:limit])
 except:
-    print("Error occured in classification report (ie. predict).\nTest set labels are:", y_test)
+    print("Error occured in classification report (ie. predict). Test set labels are:\n", y_test)
 
 # Memory
 if memory_mode:
