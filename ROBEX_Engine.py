@@ -22,16 +22,14 @@ def genStrips(root, test=False):
 							image_data = nib.load(image_dir)
 							if test:
 								print("Image loaded in. Now stripping...")
-							stripped, mask = robex(image_data)
-							outfile = "STRIPPED_" + image_file
-							strip_path = op.join(image_root, outfile)
-							print("strip path is a string:", isinstance(strip_path, str))
-							if test:
-								print("Stripped. Writing to", strip_path)
-							nib.save(stripped, str(strip_path))
-							if test:
-								print("Done. Moving to next image.")
+							try:
+								stripped, mask = robex(image_data)
+								outfile = "STRIPPED_" + image_file
+								strip_path = op.join(image_root, outfile)
+								nib.save(stripped, str(strip_path))
+							except Exception as e:
+								print("Could not strip image. Error:", e, "\nLocation:", image_root)
 	print("All done.")
 
-root = "/scratch/mssric004/ADNI_Test"
+root = "/scratch/mssric004/ADNI_Data_NIFTI"
 genStrips(root, test=False)

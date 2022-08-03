@@ -3,8 +3,8 @@
 # Info: Trying to fix the model since I'm convinced it's scuffed.
 # Last use in 2021: October 29th
 print("\nIMPLEMENTATION: TWIN")
-print("CURRENT TEST: Baby steps to making a working model.")
-# TO DO: Implement augmentations. Elastic deformation and intensity control are top contenders.
+print("CURRENT TEST: Trying to optimise the model. Attempt # 1. (TEST MODE)")
+# TO DO: Model, without normed files, but looking at the stripped files
 import os
 import subprocess as sp # Memory shit
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
@@ -23,16 +23,13 @@ from tensorflow.keras import layers
 from tensorflow.python.keras.callbacks import EarlyStopping, ModelCheckpoint, TensorBoard
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.regularizers import l2
-import matplotlib
-matplotlib.use('agg')
-import matplotlib.pyplot as plt
-#import matplotlib as plt
+import sys
 import random
 import datetime
 from collections import Counter
 from volumentations import * # OI, WE NEED TO CITE VOLUMENTATIONS NOW
 print("Imports working.")
-
+'''
 # Memory shit
 def gpu_memory_usage(gpu_id):
     command = f"nvidia-smi --id={gpu_id} --query-gpu=memory.used --format=csv"
@@ -46,7 +43,7 @@ def gpu_memory_usage(gpu_id):
 # The gpu you want to check
 gpu_id = 0
 initial_memory_usage = gpu_memory_usage(gpu_id)
-
+'''
 # Attempt to better allocate memory.
 
 gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -61,19 +58,27 @@ from datetime import date
 print("Today's date:", date.today())
 
 # Are we in testing mode?
-testing_mode = True
+testing_mode = False
 memory_mode = False
 limiter = False
 pure_mode = False
-modelname = "ADModel_TWIN_v1.4" #Next in line: ADMODEL_NEO_v1.3
-logname = "TWIN_V1.4" #Neo_V1.3
+strip_mode = False
+norm_mode = False
+curated = False
+modelname = "ADModel_TWIN_v1.8-control" #Next in line: ADMODEL_NEO_v1.3
+logname1 = "TWIN_complex_V1.8-control" #Neo_V1.3
+logname2 = "TWIN_simple_V1.8-control"
+if not testing_mode:
+    if not pure_mode:
+        print("MODELNAME:", modelname)
+        #print("LOGS CAN BE FOUND UNDER", logname)
 
 # Model hyperparameters
 if testing_mode or pure_mode:
-    epochs = 2 #Small for testing purposes
+    epochs = 20
     batches = 1
 else:
-    epochs = 20 # JUST FOR NOW
+    epochs = 25
     batches = 1 # Going to need to fiddle with this over time (balance time save vs. running out of memory)
 
 # Define image size (lower image resolution in order to speed up for broad testing)
@@ -83,9 +88,9 @@ elif pure_mode:
     scale = 2
 else:
     scale = 1 # For now
-w = int(208/scale)
-h = int(240/scale)
-d = int(256/scale)
+w = int(169/scale) # 208
+h = int(208/scale) # 240
+d = int(179/scale) # 256
 
 # Prepare parameters for fetching the data
 modo = 1 # 1 for CN/MCI, 2 for CN/AD, 3 for CN/MCI/AD, 4 for weird AD-only, 5 for MCI-only
@@ -105,13 +110,30 @@ if testing_mode:
     print("TEST MODE ENABLED.")
 elif limiter:
     print("LIMITERS ENGAGED.")
+if curated:
+    print("USING CURATED DATA.")
 if pure_mode:
     print("PURE MODE ENABLED.")
-print("Filepath is", filename)
-imgname = filename + "_images.txt"
-labname = filename + "_labels.txt"
+if norm_mode:
+    print("USING NORMALIZED, STRIPPED IMAGES.")
+elif strip_mode:
+    print("USING STRIPPED IMAGES.")
+#print("Filepath is", filename)
+if curated:
+    imgname = "Directories/curated_images.txt"
+    labname = "Directories/curated_labels.txt"
+elif norm_mode:
+    imgname = filename+"_images_normed.txt"
+    labname = filename+"_labels_normed.txt"
+elif strip_mode:
+    imgname = filename+"_images_stripped.txt"
+    labname = filename+"_labels_stripped.txt"
+else:
+    imgname = filename + "_images.txt"
+    labname = filename + "_labels.txt"
 
 # Grab the data
+print("Reading from", imgname, "and", labname)
 path_file = open(imgname, "r")
 path = path_file.read()
 path = path.split("\n")
@@ -123,14 +145,21 @@ labels = [ int(i) for i in labels]
 label_file.close()
 print("Data distribution:", Counter(labels))
 print("ClassNo:", classNo)
+#print(labels)
 labels = to_categorical(labels, num_classes=classNo, dtype='float32')
-print("Categorical shape:", labels[0].shape)
+#print("Categorical shape:", labels[0].shape)
 print("Ensuring everything is equal length:", len(path), "&", len(labels))
-
 print("\nOBTAINED DATA. (Scaling by a factor of ", scale, ")", sep='')
 
 # Split data
-if pure_mode:    
+if curated:
+    x_train = path[:14]
+    y_train = labels[:14]
+    x_val = path[14:21]
+    y_val = labels[14:21]
+    x_test = path[21:]
+    y_test = labels[21:]
+elif pure_mode:    
     x_train, y_train = shuffle(path, labels, random_state=0)
     x_test = x_train
     y_test = y_train
@@ -145,17 +174,24 @@ else:
             epochs = min(epochs,2)
         x_train, x_val, y_train, y_val = train_test_split(path, labels, stratify=labels, shuffle=True) # Defaulting to 75 train, 25 val/test. Also shuffle=true and stratifytrue.
     if testing_mode:
-        x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, test_size=0.5) # Don't stratify test data, and just split 50/50.
+        x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, test_size=0.5) # Just split 50/50.
     else:
         x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, test_size=0.2) # 70/30 val/test
 
 if not testing_mode or pure_mode:
     np.savez_compressed('testing_sub', a=x_test, b=y_test)
 
+# To observe data distribution
+def countClasses(categors, name):
+    temp = np.argmax(categors, axis=1)
+    print(name, "distribution:", Counter(temp))
+
 print("Number of training images:", len(x_train))
+countClasses(y_train, "Training")
 #y_train = np.asarray(y_train)
 if not pure_mode:
     print("Number of validation images:", len(x_val))
+    countClasses(y_val, "Validation")
 #print("Validation distribution:", Counter(y_val))
 print("Number of testing images:", len(x_test), "\n")
 #print("Testing distribution:", Counter(y_test), "\n")
@@ -219,40 +255,30 @@ def shift(image):
 
 def get_augmentation(patch_size):
     return Compose([
-        Rotate((-3, 3), (-3, 3), (-3, 3), p=0.7), #0.5
+        Rotate((-3, 3), (-3, 3), (-3, 3), p=1), #0.5
         #Flip(2, p=1)
-        ElasticTransform((0, 0.11), interpolation=2, p=0.1), #0.1
-        #GaussianNoise(var_limit=(0, 5), p=0.5),
-        RandomGamma(gamma_limit=(0.2, 0.6), p=0.2) #0.4
-    ], p=0) #0.7? #NOTE: Temp not doing augmentation. Want to take time to observe the effects of this stuff
+        ElasticTransform((0, 0.06), interpolation=2, p=0.4), #0.1
+        #GaussianNoise(var_limit=(1, 1), p=1), #0.1
+        RandomGamma(gamma_limit=(0.6, 1), p=0.4) #0.4
+    ], p=0) #0.9 #NOTE: Temp not doing augmentation. Want to take time to observe the effects of this stuff
 aug = get_augmentation((w,h,d)) # For augmentations
 
 # NOTE: DEAR ME, I HAVE CHANGED ALL INSTANCES OF FLOAT64 TO FLOAT32
 # THE REASON FOR THIS IS BECAUSE MY NORMALIZE FUNCTION OUTPUTS FLOAT32
 
 def load_image(file, label):
-    #print("Doing map stuff.")
     loc = file.numpy().decode('utf-8')
-    #label = label.numpy().decode('utf-8')
-    #label = int(label)
     nifti = np.asarray(nib.load(loc).get_fdata())
-    nifti = ne.organiseADNI(nifti, w, h, d)
-    '''
-    znum = 0 # Random variable to assist in saving augmentation test images
-    while os.path.exists("zaug_before_%s.jpg" % znum):
-        znum += 1
-    plt.imshow(nifti[:,:,(int)(d/2)], cmap='bone')
-    plt.savefig("zaug_before_%s.jpg" % znum)
-    '''
+    if norm_mode:
+        nifti = ne.resizeADNI(nifti, w, h, d, stripped=True)
+    else:
+        nifti = ne.organiseADNI(nifti, w, h, d, strip=strip_mode)
+
     # Augmentation
     data = {'image': nifti}
     aug_data = aug(**data)
     nifti = aug_data['image']
-    '''
-    plt.imshow(nifti[:,:,(int)(d/2)], cmap='bone')
-    plt.savefig("zaug_after_%s.jpg" % znum)
-    znum += 1
-    '''
+
     nifti = tf.convert_to_tensor(nifti, np.float32)
     #label.set_shape([1]) # For the you-know-what
     return nifti, label
@@ -260,14 +286,20 @@ def load_image(file, label):
 def load_val(file, label): # NO AUG
     loc = file.numpy().decode('utf-8')
     nifti = np.asarray(nib.load(loc).get_fdata())
-    nifti = ne.organiseADNI(nifti, w, h, d)
+    if norm_mode:
+        nifti = ne.resizeADNI(nifti, w, h, d, stripped=True)
+    else:
+        nifti = ne.organiseADNI(nifti, w, h, d, strip=strip_mode)
     nifti = tf.convert_to_tensor(nifti, np.float32)
     return nifti, label
 
 def load_test(file): # NO AUG, NO LABEL
     loc = file.numpy().decode('utf-8')
     nifti = np.asarray(nib.load(loc).get_fdata())
-    nifti = ne.organiseADNI(nifti, w, h, d)
+    if norm_mode:
+        nifti = ne.resizeADNI(nifti, w, h, d, stripped=True)
+    else:
+        nifti = ne.organiseADNI(nifti, w, h, d, strip=strip_mode)
     nifti = tf.convert_to_tensor(nifti, np.float32)
     return nifti
 
@@ -319,64 +351,22 @@ def gen_model(width=208, height=240, depth=256, classes=3): # Make sure defaults
     # Initial build version - no explicit Sequential definition
     inputs = keras.Input((width, height, depth, 1)) # Added extra dimension in preprocessing to accomodate that 4th dim
 
-    x = layers.Conv3D(filters=32, kernel_size=7, strides=2, activation="relu")(inputs)
-    #x = layers.MaxPool3D(pool_size=2)(x)
-
-    # Contruction seems to be pretty much the same as if this was 2D. Kernal should default to 5,5,5
-    x = layers.Conv3D(filters=32, kernel_size=3, activation="relu")(x) # Layer 1: Simple 32 node start
-    x = layers.Conv3D(filters=32, kernel_size=3, activation="relu")(x)
-    x = layers.MaxPool3D(pool_size=2)(x) # Usually max pool after the conv layer
-    #x = layers.BatchNormalization()(x)
-
-    # Doing this for now to test some things
-    x = layers.Conv3D(filters=64, kernel_size=3, activation="relu")(x)
-    x = layers.Conv3D(filters=64, kernel_size=3, activation="relu")(x)
-    x = layers.MaxPool3D(pool_size=2)(x)
-    #x = layers.BatchNormalization()(x)
-    # NOTE: Using it again, let's see how this goes
-
-    x = layers.Conv3D(filters=128, kernel_size=3, activation="relu")(x) # Double the filters
-    x = layers.Conv3D(filters=128, kernel_size=3, activation="relu")(x) # Double filters one more time
-    x = layers.Conv3D(filters=128, kernel_size=3, activation="relu")(x)
-    x = layers.MaxPool3D(pool_size=3)(x) # Pool size 3 cause I dunno, it makes the Flatten layer less intense
-    #x = layers.BatchNormalization()(x)
-    # NOTE: Also commented this one for - we MINIMAL rn
-
-    #x = layers.GlobalAveragePooling3D()(x)
-    x = layers.Flatten()(x)
-    x = layers.Dense(units=128, activation="relu")(x) # Implement a simple dense layer with double units
-    x = layers.Dropout(0.5)(x) # Start low, and work up if overfitting seems to be present
-
-    outputs = layers.Dense(units=classNo, activation="softmax")(x) # Units = no of classes. Also softmax because we want that probability output
-
-    # Define the model.
-    model = keras.Model(inputs, outputs, name="3DCNN")
-
-    return model
-
-def gen_basic_model(width=208, height=240, depth=256, classes=3): # Baby mode
-    # Initial build version - no explicit Sequential definition
-    inputs = keras.Input((width, height, depth, 1)) # Added extra dimension in preprocessing to accomodate that 4th dim
-
     x = layers.Conv3D(filters=32, kernel_size=3, padding='valid', activation="relu")(inputs) # Layer 1: Simple 32 node start
     x = layers.MaxPool3D(pool_size=3, strides=3)(x) # Usually max pool after the conv layer
-    x = layers.BatchNormalization()(x) # Do we bother with this?
-    x = layers.Dropout(0.1)(x) # Apparently there's merit to very light dropout after each conv layer
+    #x = layers.BatchNormalization()(x) # Do we bother with this?
+    #x = layers.Dropout(0.1)(x) # Apparently there's merit to very light dropout after each conv layer
     
     x = layers.Conv3D(filters=64, kernel_size=3, padding='valid', activation="relu")(x)
     x = layers.MaxPool3D(pool_size=3, strides=3)(x)
-    x = layers.BatchNormalization()(x)
-    x = layers.Dropout(0.1)(x)
+    #x = layers.BatchNormalization()(x)
+    #x = layers.Dropout(0.1)(x)
     # NOTE: RECOMMENTED LOL
-    '''
-    x = layers.Conv3D(filters=64, kernel_size=3, padding='valid', activation="relu")(x) # Double the filters
-    x = layers.MaxPool3D(pool_size=2, strides=2)(x)
-    x = layers.BatchNormalization()(x)
-    ''' # kernel_regularizer=l2(0.01), bias_regularizer=l2(0.01),
-    x = layers.Conv3D(filters=128, kernel_size=3, padding='valid',  activation="relu")(x) # Double filters one more time
+
+    # kernel_regularizer=l2(0.01), bias_regularizer=l2(0.01),
+    x = layers.Conv3D(filters=64, kernel_size=3, padding='valid',  activation="relu")(x) # Double filters one more time
     x = layers.MaxPool3D(pool_size=3, strides=3)(x)
-    x = layers.BatchNormalization()(x)
-    x = layers.Dropout(0.1)(x)
+    #x = layers.BatchNormalization()(x)
+    #x = layers.Dropout(0.1)(x)
     # NOTE: Also commented this one for - we MINIMAL rn
     
     #x = layers.Dropout(0.1)(x) # Here or below?
@@ -385,7 +375,45 @@ def gen_basic_model(width=208, height=240, depth=256, classes=3): # Baby mode
     x = layers.Dense(units=128, activation="relu")(x) # Implement a simple dense layer with double units
     #x = layers.Dense(units=506, activation="relu")(x)
     #x = layers.Dense(units=20, activation="relu")(x)
-    x = layers.Dropout(0.5)(x) # Start low, and work up if overfitting seems to be present
+    x = layers.Dropout(0.4)(x) # Start low, and work up if overfitting seems to be present
+
+    outputs = layers.Dense(units=classNo, activation="softmax")(x) # Units = no of classes. Also softmax because we want that probability output
+
+    # Define the model.
+    model = keras.Model(inputs, outputs, name="3DCNN")
+
+
+    return model
+
+def gen_basic_model(width=208, height=240, depth=256, classes=3): # Baby mode
+    # Initial build version - no explicit Sequential definition
+    inputs = keras.Input((width, height, depth, 1)) # Added extra dimension in preprocessing to accomodate that 4th dim
+
+    x = layers.Conv3D(filters=32, kernel_size=3, padding='valid', activation="relu")(inputs) # Layer 1: Simple 32 node start
+    x = layers.MaxPool3D(pool_size=10, strides=10)(x) # Usually max pool after the conv layer
+    #x = layers.BatchNormalization()(x) # Do we bother with this?
+    #x = layers.Dropout(0.1)(x) # Apparently there's merit to very light dropout after each conv layer
+    
+    #x = layers.Conv3D(filters=64, kernel_size=3, padding='valid', activation="relu")(x)
+    #x = layers.MaxPool3D(pool_size=3, strides=3)(x)
+    #x = layers.BatchNormalization()(x)
+    #x = layers.Dropout(0.1)(x)
+    # NOTE: RECOMMENTED LOL
+
+    # kernel_regularizer=l2(0.01), bias_regularizer=l2(0.01),
+    #x = layers.Conv3D(filters=128, kernel_size=3, padding='valid',  activation="relu")(x) # Double filters one more time
+    #x = layers.MaxPool3D(pool_size=3, strides=3)(x)
+    #x = layers.BatchNormalization()(x)
+    #x = layers.Dropout(0.1)(x)
+    # NOTE: Also commented this one for - we MINIMAL rn
+    
+    #x = layers.Dropout(0.1)(x) # Here or below?
+    #x = layers.GlobalAveragePooling3D()(x)
+    x = layers.Flatten()(x)
+    x = layers.Dense(units=128, activation="relu")(x) # Implement a simple dense layer with double units
+    #x = layers.Dense(units=506, activation="relu")(x)
+    #x = layers.Dense(units=20, activation="relu")(x)
+    #x = layers.Dropout(0.5)(x) # Start low, and work up if overfitting seems to be present
 
     outputs = layers.Dense(units=classNo, activation="softmax")(x) # Units = no of classes. Also softmax because we want that probability output
 
@@ -399,11 +427,17 @@ if pure_mode: # TEMP
     print("USING BASIC MODEL.")
     model = gen_basic_model(width=w, height=h, depth=d, classes=classNo)
 else:
-    model = gen_basic_model(width=w, height=h, depth=d, classes=classNo)
-model.summary()
+    # Also using basic model here because pain
+    model1 = gen_model(width=w, height=h, depth=d, classes=classNo)
+    model2 = gen_basic_model(width=w, height=h, depth=d, classes=classNo)
+print("SIMPLE MODEL SUMMARY:")
+model2.summary()
+print("COMPLEX MODEL SUMMARY:")
+model1.summary()
 optim = keras.optimizers.Adam(learning_rate=0.001)# , epsilon=1e-3) # LR chosen based on principle but double-check this later
 #model.compile(optimizer=optim, loss='binary_crossentropy', metrics=['accuracy']) # Temp binary for only two classes
-model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accuracy']) #metrics=[tf.keras.metrics.BinaryAccuracy()]
+model1.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accuracy']) #metrics=[tf.keras.metrics.BinaryAccuracy()]
+model2.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accuracy']) #metrics=[tf.keras.metrics.BinaryAccuracy()]
 # ^^^^ Temp solution for the ol' "as_list() is not defined on an unknown TensorShape issue"
 # NOTE: LOOK AT THIS AGAIN WHEN DOING 3-WAY CLASS
 
@@ -414,21 +448,31 @@ if memory_mode:
 
 # Checkpointing & Early Stopping
 es = EarlyStopping(monitor='val_loss', patience=30, restore_best_weights=False) # Temp at 30 to circumvent issue with first epoch behaving weirdly
-checkpointname = "twin_checkpoints.h5"
+checkpointname = "c_complex_checkpoints.h5"
+checkpointname_alt = "c_simple_checkpoints.h5"
 if testing_mode:
-    checkpointname = "twin_checkpoints_testing.h5"
-mc = ModelCheckpoint(checkpointname, monitor='val_loss', mode='min', verbose=2, save_best_only=False) #Maybe change to true so we can more easily access the "best" epoch
+    checkpointname = "alt_checkpoints_testing.h5"
+mc1 = ModelCheckpoint(checkpointname, monitor='val_loss', mode='min', verbose=2, save_best_only=False) #Maybe change to true so we can more easily access the "best" epoch
+mc2 = ModelCheckpoint(checkpointname_alt, monitor='val_loss', mode='min', verbose=2, save_best_only=False)
 if testing_mode:
-    log_dir = "/scratch/mssric004/test_logs/fit/twin/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    log_dir1 = "/scratch/mssric004/test_logs/fit/alt/c" + datetime.datetime.now().strftime("%d/%m/%Y-%H:%M")
+    log_dir2 = "/scratch/mssric004/test_logs/fit/alt/s" + datetime.datetime.now().strftime("%d/%m/%Y-%H:%M")
 else:
-    if logname != "na":
-        log_dir = "/scratch/mssric004/logs/fit/twin/" + logname + "_" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    if logname1 != "na":
+        log_dir1 = "/scratch/mssric004/logs/fit/alt/" + logname1 + "_" + datetime.datetime.now().strftime("%d/%m/%Y-%H:%M")
+        log_dir2 = "/scratch/mssric004/logs/fit/alt/" + logname1 + "_" + datetime.datetime.now().strftime("%d/%m/%Y-%H:%M")
     else:
-        log_dir = "/scratch/mssric004/logs/fit/twin/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-tb = TensorBoard(log_dir=log_dir, histogram_freq=1)
+        log_dir1 = "/scratch/mssric004/logs/fit/alt/complex" + datetime.datetime.now().strftime("%d/%m/%Y-%H:%M")#.strftime("%Y%m%d-%H%M%S")
+        log_dir2 = "/scratch/mssric004/logs/fit/alt/simple" + datetime.datetime.now().strftime("%d/%m/%Y-%H:%M")#.strftime("%Y%m%d-%H%M%S")
+tb1 = TensorBoard(log_dir=log_dir1, histogram_freq=1)
+tb2 = TensorBoard(log_dir=log_dir2, histogram_freq=1)
 
 # Custom callbacks (aka make keras actually report stuff during training)
 class CustomCallback(keras.callbacks.Callback):
+    def on_train_begin(self, logs=None):
+        keys = list(logs.keys())
+        print("Starting training on a model...")
+    
     def on_epoch_begin(self, epoch, logs=None):
         #keys = list(logs.keys())
         #print("End of training epoch {} of training; got log keys: {}".format(epoch, keys))
@@ -439,7 +483,6 @@ class CustomCallback(keras.callbacks.Callback):
     def on_test_begin(self, logs=None):
         keys = list(logs.keys())
         print("Start testing; got log keys: {}".format(keys))
-
     def on_test_end(self, logs=None):
         keys = list(logs.keys())
         print("Stop testing; got log keys: {}".format(keys))
@@ -449,44 +492,100 @@ class CustomCallback(keras.callbacks.Callback):
         print("...Training: end of batch {}; got log keys: {}".format(batch, keys))
     '''
 
+# Setting class weights
+from sklearn.utils import class_weight
+
+y_org = np.argmax(y_train, axis=1)
+class_weights = class_weight.compute_class_weight('balanced', classes=np.unique(y_org), y=y_org)
+class_weight_dict = dict()
+for index,value in enumerate(class_weights):
+    class_weight_dict[index] = value
+#class_weight_dict = {i:w for i,w in enumerate(class_weights)}
+print("Class weight distribution will be:", class_weight_dict)
+
 # Run the model
-print("Fitting model...")
+print("Fitting models...")
 
 if testing_mode:
     #history = model.fit(x_train, y_train, validation_data=(x_val, y_val), batch_size=batches, epochs=epochs, verbose=0)
-    history = model.fit(train_set, validation_data=validation_set, epochs=epochs, verbose=0, callbacks=[CustomCallback()]) # DON'T SPECIFY BATCH SIZE, CAUSE INPUT IS ALREADY A BATCHED DATASET
+    history1 = model1.fit(train_set, validation_data=validation_set, epochs=epochs, verbose=0, class_weight=class_weight_dict, callbacks=[CustomCallback()]) # DON'T SPECIFY BATCH SIZE, CAUSE INPUT IS ALREADY A BATCHED DATASET
+    history2 = model2.fit(train_set, validation_data=validation_set, epochs=epochs, verbose=0, class_weight=class_weight_dict, callbacks=[CustomCallback()]) # DON'T SPECIFY BATCH SIZE, CAUSE INPUT IS ALREADY A BATCHED DATASET
 elif pure_mode:
     history = model.fit(train_set, epochs=epochs, verbose=0, callbacks=[CustomCallback()])
 else:
     #history = model.fit(x_train, y_train, validation_data=(x_val, y_val), batch_size=batches, epochs=epochs, verbose=0, shuffle=True)
-    history = model.fit(train_set, validation_data=validation_set, epochs=epochs, callbacks=[mc, tb, es], verbose=0, shuffle=True)
+    history1 = model1.fit(train_set, validation_data=validation_set, epochs=epochs, class_weight=class_weight_dict, callbacks=[mc1, tb1], verbose=0, shuffle=True)
+    history2 = model2.fit(train_set, validation_data=validation_set, epochs=epochs, class_weight=class_weight_dict, callbacks=[mc2, tb2], verbose=0, shuffle=True)
 if testing_mode:
     modelname = "ADModel_TWIN_Testing"
 elif pure_mode:
     modelname = "ADModel_TWIN_Pure_Testing"
 modelname = modelname +".h5"
-model.save(modelname)
-print(history.history)
+model1.save("model_complex.h5")
+model2.save("model_simple.h5")
+#model.save(modelname)
+print("Simple model training history:")
+print(history2.history)
+print("Complex model training history:")
+print(history1.history)
 
-# Plot stuff
-plt.plot(history.history['accuracy'])
-if 'val_accuracy' in history.history:
-    plt.plot(history.history['val_accuracy'])
-    plt.legend(['train', 'val'], loc='upper left')
-plt.title('Model Accuracy')
-plt.ylabel('Accuracy')
-plt.xlabel('Epoch')
-plt.savefig("model_acc.png")
-plt.clf()
-# summarize history for loss
-plt.plot(history.history['loss'])
-if 'val_loss' in history.history:
-    plt.plot(history.history['val_loss'])
-    plt.legend(['train', 'val'], loc='upper left')
-plt.title('model loss')
-plt.ylabel('loss')
-plt.xlabel('epoch')
-plt.savefig("model_val.png")
+def make_unique(file_name, extension):
+    if os.path.isfile(file_name):
+        #print("I have determined that", file_name, "already exists.")
+        expand = 1
+        while True:
+            new_file_name = file_name.split(extension)[0] + str(expand) + extension
+            #print("What about ", new_file_name, "?", sep='')
+            if os.path.isfile(new_file_name):
+                #print("It ALSO exists.")
+                expand += 1
+                continue
+            else:
+                #print("It does not exist. Excellent.")
+                file_name = new_file_name
+                break
+    else:
+        #print("I have determined that", file_name, "does not already exist.")
+        print('', end='')
+    print("Saving to", file_name)
+    return file_name
+
+plotting = True
+if plotting:
+    print("Importing matplotlib.")
+    import matplotlib
+    matplotlib.use('agg')
+    import matplotlib.pyplot as plt
+    plotname = "Plots/model"
+    if testing_mode:
+        plotname = plotname + "_testing"
+    # Plot stuff
+    plt.plot(history1.history['accuracy'])
+    plt.plot(history1.history['val_accuracy'])
+    plt.plot(history2.history['accuracy'])
+    plt.plot(history2.history['val_accuracy'])
+    plt.legend(['complex train', 'complex val', 'simple train', 'simple val'], loc='upper left')
+    plt.title('Model Accuracy')
+    plt.ylabel('Accuracy')
+    plt.xlabel('Epoch')
+    name = plotname + "_acc.png"
+    name = make_unique(name, ".png")
+    plt.savefig(name)
+    plt.clf()
+    # summarize history for loss
+    plt.plot(history1.history['loss'])
+    plt.plot(history1.history['val_loss'])
+    plt.plot(history2.history['loss'])
+    plt.plot(history2.history['val_loss'])
+    plt.legend(['complex train', 'complex val', 'simple train', 'simple val'], loc='upper left')
+    plt.title('model loss')
+    plt.ylabel('loss')
+    plt.xlabel('epoch')
+    name = plotname + "_loss.png"
+    name = make_unique(name, ".png")
+    plt.savefig(name)
+    #plt.savefig(plotname + "_val" + ".png")
+    print("Saved plot, btw.")
 
 # Memory
 if memory_mode:
@@ -497,56 +596,84 @@ if memory_mode:
 print("\nEvaluating using test data...")
 
 # First prepare the test data
-print("Testing length check:", len(x_test), "&", len(y_test))
+#print("Testing length check:", len(x_test), "&", len(y_test))
 test = tf.data.Dataset.from_tensor_slices((x_test, y_test))
 test_x = tf.data.Dataset.from_tensor_slices((x_test))
 print("Test data prepared.")
-test_set = (
-    test.map(load_val_wrapper)
-    .batch(batch_size)
-    .prefetch(batch_size)
-) # Later we may need to use a different wrapper function? Not sure.
-
-test_set_x = (
-    test_x.map(load_test_wrapper)
-    .batch(batch_size)
-    .prefetch(batch_size)
-)
+countClasses(y_test, "Test")
 
 try:
-    scores = model.evaluate(test_set, verbose=0) # Should not need to specify batch size, because of set
-    acc = scores[1]*100
-    loss = scores[0]
-    print("Evaluated scores - Acc:", acc, "Loss:", loss)
+    test_set = (
+        test.map(load_val_wrapper)
+        .batch(batch_size)
+        .prefetch(batch_size)
+    ) # Later we may need to use a different wrapper function? Not sure.
+    try:
+        scores1 = model1.evaluate(test_set, verbose=0) # Should not need to specify batch size, because of set
+        acc1 = scores1[1]*100
+        loss1 = scores1[0]
+        scores2 = model2.evaluate(test_set, verbose=0) # Should not need to specify batch size, because of set
+        acc2 = scores2[1]*100
+        loss2 = scores2[0]
+        print("Simple model - Evaluated scores - Acc:", acc2, "Loss:", loss2)
+        print("Complex model - Evaluated scores - Acc:", acc1, "Loss:", loss1)
+    except:
+        print("Error occured during evaluation. Isn't this weird?\nTest set labels are:", y_test)
 except:
-    print("Error occured during evaluation. Isn't this weird?\nTest set labels are:", y_test)
+    print("Couldn't assign test_set to a wrapper (for evaluation).")
 
-#if not testing_mode: # NEED TO REWORK THIS
-from sklearn.metrics import classification_report
-
-print("\nGenerating classification report...")
 try:
-    y_pred = model.predict(test_set_x, verbose=0)
-    print("Before argmax:", y_pred)
-    y_pred = np.argmax(y_pred, axis=1)
-    #print("test:", y_test)
-    print("Argmax pred:", y_pred)
-    #print("\nand now we crash")
-    y_test = np.argmax(y_test, axis=1)
-    rep = classification_report(y_test, y_pred)
-    print(rep)
-    limit = min(20, len(y_test))
-    print("\nActual test set (first ", (limit+1), "):", sep='')
-    print(y_test[:limit])
-    print("Predictions are  as follows (first ", (limit+1), "):", sep='')
-    print(y_pred[:limit])
+    test_set_x = (
+        test_x.map(load_test_wrapper)
+        .batch(batch_size)
+        .prefetch(batch_size)
+    )
+    #if not testing_mode: # NEED TO REWORK THIS
+    
+    from sklearn.metrics import classification_report
+    print("\nGenerating classification report...")
+    try:
+        y_pred_1 = model1.predict(test_set_x, verbose=0)
+        y_pred_2 = model2.predict(test_set_x, verbose=0)
+        #print("Before argmax:", y_pred)
+        y_pred_1 = np.argmax(y_pred_1, axis=1)
+        y_pred_2 = np.argmax(y_pred_2, axis=1)
+        #print("test:", y_test)
+        #print("Argmax pred:", y_pred)
+        #print("\nand now we crash")
+        y_test = np.argmax(y_test, axis=1)
+        if testing_mode:
+            print("Actual values:\n", y_test)
+            print("Simple predictions:\n", y_pred_2)
+            print("Complex predictions:\n", y_pred_1)
+        rep = classification_report(y_test, y_pred_2)
+        print("SIMPLE MODEL:")
+        print(rep)
+        rep = classification_report(y_test, y_pred_1)
+        print("COMPLEX MODEL:")
+        print(rep)
+        '''
+        limit = min(20, len(y_test))
+        print("\nActual test set (first ", (limit+1), "):", sep='')
+        print(y_test[:limit])
+        print("Predictions are  as follows (first ", (limit+1), "):", sep='')
+        print(y_pred[:limit])
+        '''
+    except:
+        print("Error occured in classification report (ie. predict). Test set labels are:\n", y_test)
 except:
-    print("Error occured in classification report (ie. predict). Test set labels are:\n", y_test)
+    print("Couldn't assign test_set_x to a wrapper (for matrix).")
 
 # Memory
 if memory_mode:
     latest_gpu_memory = gpu_memory_usage(gpu_id)
     print(f"Post evaluation (GPU) Memory used: {latest_gpu_memory - initial_memory_usage} MiB")
 
-print("Done.")
+# Writing some test results down
+if False:
+    loc = "/home/mssric004/ComplexityTests.txt"
+    f = open(loc, 'a')
+    f.write(logname + " | Mode: " + str(modo) + " | Acc: " + str(acc) + " | Loss: " + str(loss) + " Time: " + datetime.datetime.now().strftime("%d/%m/%Y-%H:%M") + "\n")
+    f.close()
 
+print("Done.")

@@ -14,6 +14,7 @@ from scipy import ndimage
 #from tqdm import tqdm
 from time import sleep
 import tensorflow as tf
+#from intensity_normalization.normalize.fcm import FCMNormalize
 print("Engine loaded.")
 
 # Function: Run through an entire data folder and extract all data of a certain scan type. Graps NIFTI data and returns numpy arrays for the x-array
@@ -85,7 +86,7 @@ def extractArrays(scantype, w, h, d, orientation=0, root="C:\\Users\\richa\\Docu
             print("Warning:", sample, "does not possess data of type", scantype)
     return scan_array, meta_array
 
-def extractADNI(w, h, d, orientation=0, root="C:\\Users\\richa\\Documents\\Uni\\Thesis\\central.xnat.org", mode=3):
+def extractADNI(w, h, d, orientation=0, root="C:\\Users\\richa\\Documents\\Uni\\Thesis\\central.xnat.org", mode=3, strip=False):
     scan_array = []
     label_array = []
     class_array = []
@@ -109,7 +110,10 @@ def extractADNI(w, h, d, orientation=0, root="C:\\Users\\richa\\Documents\\Uni\\
                     for date in os.listdir(op.join(root, classes, scan, type)):
                         for image_folder in os.listdir(op.join(root, classes, scan, type, date)):
                             image_root = op.join(root, classes, scan, type, date, image_folder)
-                            image_file = os.listdir(image_root)[0]
+                            if strip:
+                                image_file = os.listdir(image_root)[1] # Strip
+                            else:
+                                image_file = os.listdir(image_root)[0] # No strip
                             image_dir = op.join(image_root, image_file)
                             #print("Reading file at", image_dir)
                             #image_data_raw = nib.load(image_dir).get_fdata()
@@ -127,39 +131,6 @@ def extractADNI(w, h, d, orientation=0, root="C:\\Users\\richa\\Documents\\Uni\\
                                 #print("Setting label to 2 (AD")
                             else:
                                 print("One of the folders does not match any of the expected forms.")
-                            '''
-                            try:
-                                image_data_raw = nib.load(image_dir).get_fdata()
-                                image_data = organiseADNI(image_data_raw, w, h, d)
-                                scan_array.append(image_data)
-                                if classes == "CN":
-                                    label_array.append(0)
-                                elif classes == "MCI":
-                                    label_array.append(1)
-                                elif classes == "AD":
-                                    label_array.append(2)
-                                else:
-                                    print("One of the folders does not match any of the expected forms.")
-                            except:
-                                if classes == "AD":
-                                    ADcounter += 1
-                                else:
-                                    Xcounter += 1
-                            '''
-                            '''
-                            try:
-                                if orientation == 1:
-                                    plt.imshow(image_data[50,:,:], cmap='bone')
-                                    plt.savefig("ADNI_1.png")
-                                elif orientation == 2:
-                                    plt.imshow(image_data[:,50,:], cmap='bone')
-                                    plt.savefig("ADNI_2.png")
-                                elif orientation == 3:
-                                    plt.imshow(image_data[:,:,30], cmap='bone')
-                                    plt.savefig("ADNI_3.png")
-                            except TypeError as e:
-                                print("Cannot display example slices:", e)
-                            '''
                             class_array.append(classes)
     #print("Samples with the wrong data type: AD[", ADcounter, " ] Else[", Xcounter, " ]")
     return scan_array, label_array
@@ -363,7 +334,7 @@ def resize(image_data, w=128, h=128, d=64):
     return image_data
 
 # Not sure what version this is. Possibly for the ADNI data?
-def resizeADNI(image_data, w = 208, h = 240, d = 256):
+def resizeADNI(image_data, w = 208, h = 240, d = 256, stripped=False):
     # Get current dimensions
     width = image_data.shape[0]
     height = image_data.shape[1]
@@ -374,7 +345,11 @@ def resizeADNI(image_data, w = 208, h = 240, d = 256):
     depth_factor = 1/(depth/d)
     length_factor = 1
     # Resize using factors
-    image_data = ndimage.zoom(image_data, (width_factor, height_factor, depth_factor, length_factor), order=1)
+    if stripped:
+        image_data = ndimage.zoom(image_data, (width_factor, height_factor, depth_factor), order=1)
+        image_data = np.expand_dims(image_data, axis=-1)
+    else:
+        image_data = ndimage.zoom(image_data, (width_factor, height_factor, depth_factor, length_factor), order=1)
     #image_data = ndimage.zoom(image_data, (width_factor, height_factor, depth_factor), order=1)
     return image_data
 
@@ -383,10 +358,10 @@ def organiseImage(data, w, h, d):
     data = resize(data, w, h, d)
     return data
 
-def organiseADNI(data, w, h, d):
+def organiseADNI(data, w, h, d, strip=False):
     data = normalize(data)
     #print("ADNI dimensions by default:", data.shape)
-    data = resizeADNI(data, w, h, d)
+    data = resizeADNI(data, w, h, d, stripped=strip)
     return data
 
 #if __name__ == "__main__":
