@@ -19,6 +19,7 @@ from scipy import ndimage
 from tensorflow import keras
 from tensorflow.keras import layers
 from tensorflow.python.keras.callbacks import EarlyStopping, ModelCheckpoint, TensorBoard
+from tensorflow.keras.utils import to_categorical
 from matplotlib import pyplot as plt
 import random
 from collections import Counter
@@ -33,7 +34,7 @@ from datetime import date
 print("Today's date:", date.today())
 
 # Are we in testing mode?
-testing_mode = False
+testing_mode = True
 modelname = "ADModel_OASIS"
 
 # Model hyperparameters
@@ -93,6 +94,8 @@ def genClassLabels(scan_meta):
     return y_arr, classNo
 
 y_arr, classNo = genClassLabels(scan_meta)
+print("Data distribution:", Counter(y_arr))
+y_arr = to_categorical(y_arr, num_classes=classNo, dtype='float32')
 #unique, counts = np.unique(y_arr, return_counts=True)
 #print(dict(zip(unique, counts)))
 
@@ -109,14 +112,14 @@ if not testing_mode:
 x_train = np.asarray(x_train)
 print("Shape of training data:", np.shape(x_train))
 y_train = np.asarray(y_train)
-print("Training distribution:", Counter(y_train))
+#print("Training distribution:", Counter(y_train))
 #if testing_mode:
     #print("Training labels:", np.argmax(y_train, axis=1)) # <---------- CHANGE MADE HERE
     #print("Training labels:", y_train)
 x_val = np.asarray(x_val)
 print("Shape of validation labels:", np.shape(x_val))
 y_val = np.asarray(y_val)
-print("Validation distribution:", Counter(y_val))
+#print("Validation distribution:", Counter(y_val))
 #print("Validation labels:", y_val)
 
 # Model architecture go here
@@ -124,42 +127,43 @@ def gen_model(width=208, height=240, depth=256, classes=3): # Make sure defaults
     # Initial build version - no explicit Sequential definition
     inputs = keras.Input((width, height, depth, 1)) # Added extra dimension in preprocessing to accomodate that 4th dim
 
-    # Contruction seems to be pretty much the same as if this was 2D. Kernal should default to 5,5,5
-    x = layers.Conv3D(filters=32, kernel_size=5, activation="relu")(inputs) # Layer 1: Simple 32 node start
-    x = layers.MaxPool3D(pool_size=2)(x) # Usually max pool after the conv layer
-    x = layers.BatchNormalization()(x)
+    x = layers.Conv3D(filters=32, kernel_size=3, padding='valid', activation="relu")(inputs) # Layer 1: Simple 32 node start
+    x = layers.MaxPool3D(pool_size=2, strides=2)(x) # Usually max pool after the conv layer
+    #x = layers.BatchNormalization()(x) # Do we bother with this?
+    #x = layers.Dropout(0.1)(x) # Apparently there's merit to very light dropout after each conv layer
 
-    x = layers.Conv3D(filters=64, kernel_size=5, activation="relu")(x)
-    x = layers.MaxPool3D(pool_size=2)(x)
-    x = layers.BatchNormalization()(x) # Batch out
+    x = layers.Conv3D(filters=64, kernel_size=3, padding='valid', activation="relu")(x)
+    x = layers.MaxPool3D(pool_size=2, strides=2)(x)
+    #x = layers.BatchNormalization()(x)
     # NOTE: RECOMMENTED LOL
 
-    x = layers.Conv3D(filters=64, kernel_size=5, activation="relu", padding="same")(x) # Double the filters
-    x = layers.MaxPool3D(pool_size=2, padding="same")(x)
-    x = layers.BatchNormalization()(x) # Batch out
+    x = layers.Conv3D(filters=64, kernel_size=3, padding='valid', activation="relu")(x) # Double the filters
+    x = layers.MaxPool3D(pool_size=2, strides=2)(x)
+    #x = layers.BatchNormalization()(x)
 
-    x = layers.Conv3D(filters=128, kernel_size=5, activation="relu", padding="same")(x) # Double filters one more time
-    x = layers.MaxPool3D(pool_size=2, padding="same")(x) # Alsp added all these padding lines to everything to try fix an error
-    x = layers.BatchNormalization()(x)
+    x = layers.Conv3D(filters=128, kernel_size=3, padding='valid', activation="relu")(x) # Double filters one more time
+    x = layers.MaxPool3D(pool_size=3, strides=2)(x)
+    #x = layers.BatchNormalization()(x)
     # NOTE: Also commented this one for - we MINIMAL rn
 
-    x = layers.GlobalAveragePooling3D()(x) # 
+    #x = layers.GlobalAveragePooling3D()(x)
+    #x = layers.Dropout(0.5)(x) # Here or below?
+    x = layers.Flatten()(x)
     x = layers.Dense(units=128, activation="relu")(x) # Implement a simple dense layer with double units
-    x = layers.Dropout(0.2)(x) # Start low, and work up if overfitting seems to be present
+    #x = layers.Dropout(0.5)(x) # Start low, and work up if overfitting seems to be present
 
-    outputs = layers.Dense(units=classes, activation="softmax")(x) # Units = no of classes. Also softmax because we want that probability output
+    outputs = layers.Dense(units=classNo, activation="softmax")(x) # Units = no of classes. Also softmax because we want that probability output
 
     # Define the model.
-    model = keras.Model(inputs, outputs, name="3DCNN")
+    model = keras.Model(inputs, outputs, name="3DCNN_Basic")
 
     return model
 
 # Build model.
 model = gen_model(width=w, height=h, depth=d, classes=classNo)
 model.summary()
-optim = keras.optimizers.Adam(learning_rate=0.001) # LR chosen based on principle but double-check this later
-model.compile(optimizer=optim, loss='binary_crossentropy', metrics=['accuracy']) # Temp binary for only two classes
-# NOTE: LOOK AT THIS AGAIN WHEN DOING 3-WAY CLASS
+optim = keras.optimizers.Adam(learning_rate=0.001) #, epsilon=1e-3) # LR chosen based on principle but double-check this later
+model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accuracy']) #metrics=[tf.keras.metrics.BinaryAccuracy()]
 
 # Additional params
 class_weight = {0: 1., 1: 3.}
@@ -195,8 +199,9 @@ from sklearn.metrics import classification_report
 
 print("\nGenerating classification report...")
 y_pred = model.predict(x_test, batch_size=1, verbose=0)
+print("Before argmax:", y_pred)
 y_pred = np.argmax(y_pred, axis=1)
-#y_test = np.argmax(y_test, axis=1) # <---------- CHANGE MADE HERE
+y_test = np.argmax(y_test, axis=1)
 rep = classification_report(y_test, y_pred)
 print(rep)
 limit = min(20, len(y_test))
