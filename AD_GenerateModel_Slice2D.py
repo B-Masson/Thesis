@@ -1,13 +1,10 @@
 # Implementing 2D model using slices and majority voting
 # Richard Masson
-# Last use in 2021: October 29th
 print("\nIMPLEMENTATION: 2D Slices")
-print("CURRENT TEST: Attempting to train on every slice.")
-#print("CURRENT TEST: First official test on everything.")
-# TO DO: Model2
+print("CURRENT TEST: Modern Slice, CN vs. AD.")
 import os
-from pyexpat import model
-import subprocess as sp # Memory shit
+import subprocess as sp
+from time import perf_counter
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 import sys
 import nibabel as nib
@@ -18,7 +15,6 @@ from sklearn.model_selection import train_test_split
 from sklearn.utils import shuffle
 from mlxtend.classifier import EnsembleVoteClassifier
 import tensorflow as tf
-#print("TF Version:", tf.version.VERSION)
 from scipy import ndimage
 from tensorflow import keras
 from tensorflow.keras import layers
@@ -28,16 +24,15 @@ from tensorflow.keras.regularizers import l2
 import random
 import datetime
 from collections import Counter
-from volumentations import * # OI, WE NEED TO CITE VOLUMENTATIONS NOW
-import matplotlib
-matplotlib.use('agg')
-import matplotlib.pyplot as plt
+from volumentations import *
+import glob
 print("Imports working.")
-# Attempt to better allocate memory.
 
-config = tf.compat.v1.ConfigProto()
-config.gpu_options.allow_growth=True
-sess = tf.compat.v1.Session(config=config)
+tic_total = perf_counter()
+# Attempt to better allocate memory.
+gpus = tf.config.experimental.list_physical_devices('GPU')
+for gpu in gpus:
+  tf.config.experimental.set_memory_growth(gpu, True)
 
 from datetime import date
 print("Today's date:", date.today())
@@ -45,14 +40,14 @@ print("Today's date:", date.today())
 # Are we in testing mode?
 testing_mode = False
 memory_mode = False
-#limiter = False
-#pure_mode = False
+limiter = False
+pure_mode = False
 strip_mode = False
 norm_mode = False
 trimming = True
-maxxing = False
-modelname = "ADModel_2DSlice_V1.4-entire"
-logname = "2DSlice_V1.4-entire"
+maxxing = True # True = use prio slices
+logname = "2DSlice_V6-prio-AD"
+modelname = "ADModel_"+logname
 if not testing_mode:
     print("MODELNAME:", modelname)
     print("LOGS CAN BE FOUND UNDER", logname)
@@ -60,13 +55,11 @@ if not testing_mode:
 # Model hyperparameters
 if testing_mode:
     epochs = 1 #Small for testing purposes
-    batches = 1
+    batch_size = 3
 else:
-    epochs = 15 # JUST FOR NOW
-    batches = 1 # Going to need to fiddle with this over time (balance time save vs. running out of memory)
+    batch_size = 3
 
 # Set which slices to use, based on previous findings
-# To-do: I really need to automate this by saving the best values
 priority_slices = [56, 57, 58, 64, 75, 85, 88, 89, 96]
 
 # Define image size (lower image resolution in order to speed up for broad testing)
@@ -77,27 +70,23 @@ else:
 w = int(169/scale)
 h = int(208/scale)
 d = int(179/scale)
-
-# Slice params
-#n = -1 # If it ever comes up as -1, we know future assignments aren't working.
+tic = perf_counter()
 
 # Prepare parameters for fetching the data
-modo = 2 # 1 for CN/MCI, 2 for CN/AD, 3 for CN/MCI/AD, 4 for weird AD-only, 5 for MCI-only
+modo = 2 # 1 for CN/MCI, 2 for CN/AD, 3 for CN/MCI/AD, 4 for AD-only, 5 for MCI-only
 if modo == 3 or modo == 4:
-    print("Setting for 3 classes")
     classNo = 3 # Expected value
 else:
-    print("Setting for 2 classes")
+    #print("Setting for 2 classes")
     classNo = 2 # Expected value
-if testing_mode: # CHANGIN THINGS UP
-	filename = ("Directories/test_adni_" + str(modo)) # CURRENTLY AIMING AT TINY ZONE
+if testing_mode:
+	filename = ("Directories/test_adni_" + str(modo))
 else:
     filename = ("Directories/adni_" + str(modo))
 if testing_mode:
     print("TEST MODE ENABLED.")
 if trimming:
     print("TRIMMING DOWN CLASSES TO PREVENT IMBALANCE")
-
 if trimming:
     imgname = filename+"_trimmed_images.txt"
     labname = filename+"_trimmed_labels.txt"
@@ -117,46 +106,56 @@ labels = labels.split("\n")
 labels = [ int(i) for i in labels]
 label_file.close()
 print("Data distribution:", Counter(labels))
-print("ClassNo:", classNo)
-#print(labels)
 labels = to_categorical(labels, num_classes=classNo, dtype='float32')
-#print("Categorical shape:", labels[0].shape)
+#
 print("\nOBTAINED DATA. (Scaling by a factor of ", scale, ")", sep='')
 
 # Split data
+rar = 0
 if testing_mode:
-    x_train, x_val, y_train, y_val = train_test_split(path, labels, test_size=0.5, stratify=labels, shuffle=True) # 50/50 (for eventual 50/25/25)
+    x_train, x_val, y_train, y_val = train_test_split(path, labels, test_size=0.5, stratify=labels, random_state=rar, shuffle=True) # 50/50 (for eventual 50/25/25)
 else:
-    x_train, x_val, y_train, y_val = train_test_split(path, labels, stratify=labels, shuffle=True) # Defaulting to 75 train, 25 val/test. Also shuffle=true and stratifytrue.
+    x_train, x_val, y_train, y_val = train_test_split(path, labels, stratify=labels, random_state=rar, shuffle=True) # Defaulting to 75 train, 25 val/test. Also shuffle=true and stratifytrue.
 if testing_mode:
-    x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, test_size=0.5) # Don't stratify test data, and just split 50/50.
+    x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, test_size=0.5, random_state=rar, shuffle=True) # Just split 50/50.
 else:
-    x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, test_size=0.2) # 70/30 val/test
-
-if not testing_mode:
-    np.savez_compressed('testing_sub', a=x_test, b=y_test)
+    x_val, x_test, y_val, y_test = train_test_split(x_val, y_val, stratify=y_val, random_state=rar, test_size=0.4, shuffle=True) # 60/40 val/test
+# Now stitch them together
+x = x_train + x_val
+traintemp = np.argmax(y_train, axis=1).tolist()
+valtemp = np.argmax(y_val, axis=1).tolist()
+y = traintemp+valtemp
+x = np.array(x)
+y = np.array(y)
 
 # To observe data distribution
 def countClasses(categors, name):
     temp = np.argmax(categors, axis=1)
     print(name, "distribution:", Counter(temp))
 
-print("Number of training images:", len(x_train))
-countClasses(y_train, "Training")
-print("Number of validation images:", len(x_val))
-countClasses(y_val, "Validation")
+print("Number of training/validation images:", len(x))
 print("Number of testing images:", len(x_test), "\n")
+if testing_mode:
+    print("Training labels:", y)
 
 # Data augmentation functions
 def get_augmentation(patch_size):
     return Compose([
-        Rotate((-3, 3), (-3, 3), (-3, 3), p=0.6), #0.5
-        #Flip(2, p=1)
-        ElasticTransform((0, 0.05), interpolation=2, p=0.3), #0.1
-        #GaussianNoise(var_limit=(1, 1), p=1), #0.1
-        RandomGamma(gamma_limit=(0.6, 1), p=0) #0.4
-    ], p=1) #0.9 #NOTE: Temp not doing augmentation. Want to take time to observe the effects of this stuff
+        Rotate((-3, 3), (-3, 3), (-3, 3), p=0.6),
+        ElasticTransform((0, 0.05), interpolation=2, p=0.3),
+        RandomGamma(gamma_limit=(0.6, 1), p=0)
+    ], p=1)
 aug = get_augmentation((w,h,d)) # For augmentations
+
+# 2D Augmentation stuff
+import imgaug as ia
+import imgaug.augmenters as iaa
+rotaterand = lambda aug: iaa.Sometimes(0.6, aug)
+elastrand = lambda aug: iaa.Sometimes(0.3, aug)
+seq = iaa.Sequential([
+    rotaterand(iaa.Rotate((-3, 3))),
+    elastrand(iaa.ElasticTransformation(alpha=(0, 0.05), sigma=0.1))
+])
 
 def load_image(file, label):
     loc = file.numpy().decode('utf-8')
@@ -165,9 +164,7 @@ def load_image(file, label):
         nifti = ne.resizeADNI(nifti, w, h, d, stripped=True)
     else:
         nifti = ne.organiseADNI(nifti, w, h, d, strip=strip_mode)
-    data = {'image': nifti}
-    aug_data = aug(**data)
-    nifti = aug_data['image']
+    
     nifti = tf.convert_to_tensor(nifti, np.float32)
     return nifti, label
 
@@ -184,22 +181,28 @@ def load_test(file): # NO AUG, NO LABEL
 def load_slice(file, label):
     loc = file.numpy().decode('utf-8')
     nifti = np.asarray(nib.load(loc).get_fdata())
-    #print("using slice", n)
     slice = nifti[:,:,n]
     slice = ne.organiseSlice(slice, w, h, strip=strip_mode)
     # Augmentation
-    # TO DO
+    slice = seq(image=slice)
+    slice = tf.convert_to_tensor(slice, np.float32)
+    return slice, label
+
+def load_val_slice(file, label):
+    loc = file.numpy().decode('utf-8')
+    nifti = np.asarray(nib.load(loc).get_fdata())
+    slice = nifti[:,:,n]
+    slice = ne.organiseSlice(slice, w, h, strip=strip_mode)
+    # No augmentation for val
     slice = tf.convert_to_tensor(slice, np.float32)
     return slice, label
 
 def load_testslice(file):
     loc = file.numpy().decode('utf-8')
     nifti = np.asarray(nib.load(loc).get_fdata())
-    #print("using slice", n)
     slice = nifti[:,:,n]
     slice = ne.organiseSlice(slice, w, h, strip=strip_mode)
-    # Augmentation
-    # TO DO
+    # No augmentation for tests
     slice = tf.convert_to_tensor(slice, np.float32)
     return slice
 
@@ -212,13 +215,15 @@ def load_test_wrapper(file):
 def load_slice_wrapper(file, labels):
     return tf.py_function(load_slice, [file, labels], [np.float32, np.float32])
 
+def load_sliceval_wrapper(file, labels):
+    return tf.py_function(load_val_slice, [file, labels], [np.float32, np.float32])
+
 def load_testslice_wrapper(file):
     return tf.py_function(load_testslice, [file], [np.float32])
 
-# This needs to exist in order to allow for us to use an accuracy metric without getting weird errors
 def fix_shape(images, labels):
     images.set_shape([None, w, h, 1])
-    labels.set_shape([1, classNo])
+    labels.set_shape([images.shape[0], classNo])
     return images, labels
 
 def fix_dims(image):
@@ -226,14 +231,11 @@ def fix_dims(image):
     return image
 
 print("Setting up dataloaders...")
-# TO-DO: Augmentation stuff
-batch_size = batches
 # Data loaders
 train = tf.data.Dataset.from_tensor_slices((x_train, y_train))
 val = tf.data.Dataset.from_tensor_slices((x_val, y_val))
 
 train_set = (
-    #train.shuffle(len(train))
     train.map(load_slice_wrapper)
     .batch(batch_size)
     .map(fix_shape)
@@ -242,33 +244,48 @@ train_set = (
 
 # Only rescale.
 validation_set = (
-    #val.shuffle(len(x_val))
-    val.map(load_slice_wrapper)
+    val.map(load_sliceval_wrapper)
     .batch(batch_size)
     .map(fix_shape)
     .prefetch(batch_size)
 )
 
 # Model architecture go here
-def gen_basic_model(width, height, channels, classes=3): # Baby mode
-    # Initial build version - no explicit Sequential definition
-    inputs = keras.Input((width, height, channels))
-
-    x = layers.Conv2D(filters=32, kernel_size=3, padding='valid', activation="relu", kernel_regularizer =tf.keras.regularizers.l2( l=0.01), data_format="channels_last")(inputs) # Layer 1: Simple 32 node start
-    x = layers.MaxPool2D(pool_size=5, strides=5)(x) # Usually max pool after the conv layer
-
+def gen_advanced_2d_model(width=169, height=208, depth=179, classes=2):
+    modelname = "Advanced-2DSlice-CNN"
+    #print(modelname)
+    inputs = keras.Input((width, height, depth))
+    
+    x = layers.Conv2D(filters=8, kernel_size=5, padding='valid', activation='relu', data_format="channels_last")(inputs)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPool2D(pool_size=2, strides=2)(x)
+    x = layers.Dropout(0.1)(x)
+    
+    x = layers.Conv2D(filters=16, kernel_size=5, padding='valid', activation='relu', data_format="channels_last")(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPool2D(pool_size=2, strides=2)(x)
+    x = layers.Dropout(0.1)(x)
+    
+    x = layers.Conv2D(filters=32, kernel_size=5, padding='valid', kernel_regularizer =tf.keras.regularizers.l2( l=0.01), activation='relu', data_format="channels_last")(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPool2D(pool_size=2, strides=2)(x)
+    x = layers.Dropout(0.1)(x)
+    
+    x = layers.Conv2D(filters=64, kernel_size=5, padding='valid', kernel_regularizer =tf.keras.regularizers.l2( l=0.01), activation='relu', data_format="channels_last")(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.MaxPool2D(pool_size=2, strides=2)(x)
+    x = layers.Dropout(0.1)(x)
+    
     x = layers.Flatten()(x)
-    x = layers.Dense(units=128, activation="relu")(x) # Implement a simple dense layer with double units
-
-    outputs = layers.Dense(units=classes, activation="softmax")(x) # Units = no of classes. Also softmax because we want that probability output
-
-    # Define the model.
-    model = keras.Model(inputs, outputs, name="3DCNN_Basic")
-
+    x = layers.Dropout(0.3)(x)
+    x = layers.Dense(units=128, activation='relu')(x)
+    x = layers.Dense(units=64, activation='relu')(x)
+    
+    outputs = layers.Dense(units=classes, activation='softmax')(x)
+    
+    model = keras.Model(inputs, outputs, name=modelname)
+    
     return model
-
-# Build model.
-optim = keras.optimizers.Adam(learning_rate=0.001)# , epsilon=1e-3) # LR chosen based on principle but double-check this later
 
 # Custom callbacks (aka make keras actually report stuff during training)
 class CustomCallback(keras.callbacks.Callback):
@@ -279,72 +296,70 @@ class CustomCallback(keras.callbacks.Callback):
         #if (epoch+1) == epochs:
         #    print('')
 
-# Setting class weights
-from sklearn.utils import class_weight
+# Build model.
+optim = keras.optimizers.Adam(learning_rate=0.0001)
 
-y_org = np.argmax(y_train, axis=1)
-class_weights = class_weight.compute_class_weight('balanced', classes=np.unique(y_org), y=y_org)
-class_weight_dict = dict()
-for index,value in enumerate(class_weights):
-    class_weight_dict[index] = value
-#class_weight_dict = {i:w for i,w in enumerate(class_weights)}
-print("Class weight distribution will be:", class_weight_dict)
+# Checkpointing & Early Stopping
+if batch_size > 1:
+    metric = 'binary_accuracy'
+else:
+    metric = 'accuracy'
+mon = 'val_' +metric
+es = EarlyStopping(monitor=mon, patience=10, restore_best_weights=True)
+checkpointname = "/scratch/mssric004/Checkpoints/testing-{epoch:02d}.ckpt"
+localcheck = "/scratch/mssric004/TrueChecks/" + modelname +".ckpt"
+mc = ModelCheckpoint(checkpointname, monitor=mon, mode='auto', verbose=2, save_weights_only=True, save_best_only=False)
 
 # Run the model
 print("\nGenerating models...")
 
-# Each image needs to become a bunch of slices. Slices are the 2D extractions that then need to be replicated into 3 channels
-# Start of useful data: 50 , end of useful data: 156 (Alt)
-# For every slice, create a model and fit it onto the 2D image array
-# Plan: Loop n from 50 to 156. Each loop, set some global var, which then tells the loader to only extract slices at that point
-# Loader then needs to load image, turn into array, take slice, replicate into 3 channels, then pass that into the 2D model
-# Record the validation accuracy of each model in a 1D array
-# Array of models are then entered into the scikit ensemble class, 'soft' voting, with weights set to an array of validation accuracies
-# Can then evaluate on test data
-
-channels = 1 # Replicating into 3 channels is proving annoying
+channels = 1 # Treat as greyscale (which it is)
 
 def generateModels(start, stop):
     models = []
     weights = []
+    epochdict = {}
     for i in range(start, stop):
         global n
         n = i
         print("Fitting for slice", n, "out of", stop-1)
 
         # Set up a model
-        model = gen_basic_model(w, h, channels, classes=classNo)
-        model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accuracy']) #metrics=[tf.keras.metrics.BinaryAccuracy()]
-        
-        # Checkpointing & Early Stopping
-        es = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True) # Temp at 30 to circumvent issue with first epoch behaving weirdly
-        checkpointname = "/2d_V1_checkpoints/slice" +str(n) +".h5"
-        if testing_mode:
-            checkpointname = "2d_V1_checkpoints_testing.h5"
-        mc = ModelCheckpoint(checkpointname, monitor='val_loss', mode='min', verbose=1, save_best_only=True) #Maybe change to true so we can more easily access the "best" epoch
-        if testing_mode:
-            log_dir = "/scratch/mssric004/test_logs/fit/2dslice/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        model = gen_advanced_2d_model(w, h, channels, classes=classNo)
+        if i == start:
+            model.summary()
+        if metric == 'binary_accuracy':
+            model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=[tf.keras.metrics.BinaryAccuracy()])
         else:
-            log_dir = "/scratch/mssric004/logs/fit/2dsliceNEO/" + logname + "/slice" +str(n) +"_" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        tb = TensorBoard(log_dir=log_dir, histogram_freq=1)
+            model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accuracy'])
+        print("Metric being used:", metric)
+        
+        # Re-instantiate here
+        be = ModelCheckpoint(localcheck, monitor=mon, mode='auto', verbose=2, save_weights_only=True, save_best_only=True, initial_value_threshold=0)
         
         # Fitting time
         if testing_mode:
-            history = model.fit(train_set, validation_data=validation_set, epochs=epochs, verbose=0, callbacks=[CustomCallback()]) # DON'T SPECIFY BATCH SIZE, CAUSE INPUT IS ALREADY A BATCHED DATASET
+            history = model.fit(train_set, validation_data=validation_set, epochs=epochs, verbose=0, callbacks=[be, CustomCallback()])
         else:
-            history = model.fit(train_set, validation_data=validation_set, epochs=epochs, verbose=0, shuffle=True)
-            # Note: I have TEMPORARILY REMOVED CALLBACKS
-            # DEAR ME, I HAVE REMOVED THE CLASS WEIGHTING STUFF. FOR NOW.
+            history = model.fit(train_set, validation_data=validation_set, epochs=epochs, verbose=0, callbacks=[es, be], shuffle=True)
         modelname = "model-"+str(n)
         models.append(tuple((modelname, model)))
         print(history.history)
-        weight = history.history['val_accuracy'][-1]
+        weight = history.history['val_'+metric][-1]
         weights.append(weight)
-    return models, weights
+        epochdict[modelname] = len(history.history['val_loss'])
+        # Clean up checkpoints
+        found = glob.glob(localcheck+"*")
+        removecount = 0
+        for checkfile in found:
+            removecount += 1
+            os.remove(checkfile)
+    return models, weights, epochdict
 
 def generatePriorityModels(slices):
     models = []
     weights = []
+    epochdict = {}
     for i in range(len(slices)):
         global n
         n = slices[i]
@@ -353,53 +368,58 @@ def generatePriorityModels(slices):
         display.insert(i, "->")
         print(display)
         # Set up a model
-        model = gen_basic_model(w, h, channels, classes=classNo)
-        model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accuracy']) #metrics=[tf.keras.metrics.BinaryAccuracy()]
-        
-        # Checkpointing & Early Stopping
-        es = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True) # Temp at 30 to circumvent issue with first epoch behaving weirdly
-        checkpointname = "/2d_V1_checkpoints/slice" +str(n) +".h5"
-        if testing_mode:
-            checkpointname = "2d_V1_checkpoints_testing.h5"
-        mc = ModelCheckpoint(checkpointname, monitor='val_loss', mode='min', verbose=1, save_best_only=True) #Maybe change to true so we can more easily access the "best" epoch
-        if testing_mode:
-            log_dir = "/scratch/mssric004/test_logs/fit/2dslice/" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        model = gen_advanced_2d_model(w, h, channels, classes=classNo)
+        if metric == 'binary_accuracy':
+            model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=[tf.keras.metrics.BinaryAccuracy()])
         else:
-            log_dir = "/scratch/mssric004/logs/fit/2dsliceNEO/" + logname + "/slice" +str(n) +"_" + datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        tb = TensorBoard(log_dir=log_dir, histogram_freq=1)
+            model.compile(optimizer=optim, loss='categorical_crossentropy', metrics=['accuracy'])
+        print("Metric being used:", metric)
+        
+        # Re-instantiate here
+        be = ModelCheckpoint(localcheck, monitor=mon, mode='auto', verbose=2, save_weights_only=True, save_best_only=True, initial_value_threshold=0)
         
         # Fitting time
         if testing_mode:
-            history = model.fit(train_set, validation_data=validation_set, epochs=epochs, verbose=0, callbacks=[CustomCallback()]) # DON'T SPECIFY BATCH SIZE, CAUSE INPUT IS ALREADY A BATCHED DATASET
+            history = model.fit(train_set, validation_data=validation_set, callbacks=[be, CustomCallback()], epochs=epochs)
         else:
-            history = model.fit(train_set, validation_data=validation_set, epochs=epochs, verbose=0, callbacks=[es, tb], shuffle=True)
-            # Note: I have TEMPORARILY REMOVED CHECKPOINTS
+            history = model.fit(train_set, validation_data=validation_set, epochs=epochs, verbose=0, callbacks=[be, es], shuffle=True)
         modelname = "model-"+str(n)
+        # Load best checkpoint
+        model.load_weights(localcheck)
+        # Clean up checkpoints
+        found = glob.glob(localcheck+"*")
+        removecount = 0
+        for checkfile in found:
+            removecount += 1
+            os.remove(checkfile)
+            
         models.append(tuple((modelname, model)))
         print(history.history)
-        weight = history.history['val_accuracy'][-1]
+        weight = history.history['val_'+metric][-1]
         weights.append(weight)
-    return models, weights
+        epochdict[modelname] = len(history.history['val_loss'])
+    return models, weights, epochdict
 
-startpoint = 50 # According to SelectSlices findings
-endpoint = 100 # # Remember, it will end at n-1
-# and the after, do 100-157
-#if testing_mode:
+startpoint = 101
+endpoint = 158
+
 if testing_mode:
-    startpoint = 95
-    endpoint = 100
+    startpoint = 101
+    endpoint = 102
+
+tic = perf_counter()
 
 if maxxing:
-    model_list, weights = generatePriorityModels(priority_slices)
+    model_list, weights, epochdict = generatePriorityModels(priority_slices)
 else:
-    model_list, weights = generateModels(startpoint, endpoint)
-#print("Validation accuracies:")
+    model_list, weights, epochdict = generateModels(startpoint, endpoint)
+
+toc = perf_counter()
 wcount = []
 wcount = startpoint
 for weight in weights:
-    #print("Slice", wcount, "-", round(weight,2)*100)
     wcount += 1
-thresh = 60
+thresh = 65
 print("********\nSlices with > ", thresh, "% validation acc:", sep='')
 try:
     for i in range(len(weights)):
@@ -409,25 +429,14 @@ try:
 except Exception as e:
     print(e)
 print("********\nAssigning to voting classifier...")
-'''
-# Sklearn strat
-voter = EnsembleVoteClassifier(clfs=model_list, voting='hard', weights=weights, verbose=2, fit_base_estimators=False)
-voter.fit(None,np.array([0,1]))
-
-predx, predy = next(iter(validation_set))
-pred = voter.predict(predx)
-print("Predicted:", pred, "\nActual:", predy)
-'''
-# Manual strat
 
 test = tf.data.Dataset.from_tensor_slices((x_test, y_test))
 test_x = tf.data.Dataset.from_tensor_slices((x_test))
 print("Test data prepared.")
 
 test_set = (
-    val.map(load_slice_wrapper)
+    test.map(load_sliceval_wrapper)
     .batch(batch_size)
-    #.map(fix_shape)
     .prefetch(batch_size)
 )
 
@@ -435,31 +444,45 @@ try:
     test_set_x = (
         test_x.map(load_testslice_wrapper)
         .batch(batch_size)
-        #.map(fix_dims)
         .prefetch(batch_size)
     )
 except Exception as e:
     print("Couldn't fit test_set_x for some reason. Error:\n", e)
-#if not testing_mode: # NEED TO REWORK THIS
 
 preds=[]
 predi=[]
 evals=[]
-n = startpoint
-print("Evaluating...")
-for j in range(len(model_list)):
-    scores = model_list[j][1].evaluate(test_set, verbose=0)
-    acc = scores[1]*100
-    loss = scores[0]
-    evals.append(acc)
-    try:
-        pred = model_list[j][1].predict(test_set_x)
-        preds.append(pred)
-        predi.append(np.argmax(pred, axis=1))
-    except:
-        preds.append[[-1,-1]]
-        predi.append(-1)
-    n += 1
+if not maxxing:
+    n = startpoint
+    print("Evaluating...")
+    for j in range(len(model_list)):
+        scores = model_list[j][1].evaluate(test_set, verbose=0)
+        acc = scores[1]*100
+        loss = scores[0]
+        evals.append(acc)
+        try:
+            pred = model_list[j][1].predict(test_set_x)
+            preds.append(pred)
+            predi.append(np.argmax(pred, axis=1))
+        except:
+            preds.append[[-1,-1]]
+            predi.append(-1)
+        n += 1
+else:
+    print("Evaluating...")
+    for j in range(len(model_list)):
+        n = priority_slices[j]
+        scores = model_list[j][1].evaluate(test_set, verbose=0)
+        acc = scores[1]*100
+        loss = scores[0]
+        evals.append(acc)
+        try:
+            pred = model_list[j][1].predict(test_set_x)
+            preds.append(pred)
+            predi.append(np.argmax(pred, axis=1))
+        except:
+            preds.append[[-1,-1]]
+            predi.append(-1)
 
 from sklearn.metrics import accuracy_score
 from statistics import mode
@@ -467,7 +490,6 @@ from statistics import mode
 # Soft = combine the probabilities of all slices together (also using weights)
 def soft_voting(predicted_probas : list, weights : list) -> np.array:
 
-    #sv_predicted_proba = np.mean(predicted_probas, axis=0)
     sv_predicted_proba = np.average(predicted_probas, axis=0, weights=weights)
     sv_predicted_proba[:,-1] = 1 - np.sum(sv_predicted_proba[:,:-1], axis=1)    
 
@@ -477,17 +499,30 @@ def soft_voting(predicted_probas : list, weights : list) -> np.array:
 def hard_voting(predictions : list) -> np.array:
     return [mode(v) for v in np.transpose(np.array(predictions))]
 
-#sv_predicted_proba, sv_predictions = soft_voting(preds)
 sv_predicted_proba, sv_predictions = soft_voting(preds, weights)
 hv_predictions = hard_voting(predi)
 
 Y_test=np.argmax(y_test, axis=1)
 
 for k in range(len(model_list)):
-    #print("COMPARE THESE:\n", y_test, "\n", preds[k])
     print(f"Accuracy of {model_list[k][0]}: {accuracy_score(Y_test, predi[k])}")
     
 print(f"\nAccuracy of Soft Voting: {accuracy_score(Y_test, sv_predictions)}")
 print(f"Accuracy of Hard Voting: {accuracy_score(Y_test, hv_predictions)}")
 
-print("All done!")
+# Save models
+print("Attempting to save this big list of models.")
+if not testing_mode:
+    for model in model_list:
+        model[1].save_weights("/scratch/mssric004/SliceCheckpointsPt2/"+model[0]+".h5")
+
+
+toc_total = perf_counter()
+total_seconds = (int) (toc_total-tic_total)
+train_seconds = (int) (toc-tic)
+total_time = datetime.timedelta(seconds=(total_seconds))
+train_time = datetime.timedelta(seconds=train_seconds)
+percen = (int)(train_seconds/total_seconds*100)
+
+print("Done. Epoch counts:", epochdict)
+print("Total time:", total_time, "- Training time:", train_time, ">", percen)
