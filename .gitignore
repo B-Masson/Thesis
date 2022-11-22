@@ -20,3 +20,6 @@ AD
 AD_NIFTI
 *_TEMP*
 OldCode
+*.code-workspace
+*.png
+*.txt
