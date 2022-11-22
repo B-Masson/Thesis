@@ -1,10 +1,11 @@
+# Check the dimensions of contained images
+# Richard Masson
 import nibabel as nib
 import numpy as np
 from scipy import stats
 import os.path as op
 
 dirs = []
-#dirs.append("Directories/test_adni_1_images.txt")
 dirs.append("Directories/adni_1_images.txt")
 dirs.append("Directories/adni_1_images_normed.txt")
 dirs.append("Directories/adni_3_images.txt")
@@ -27,7 +28,6 @@ for dir_file in dirs:
 
         for file in path:
             nifti = np.asarray(nib.load(file).get_fdata())
-            #print("Shape:", nifti.shape)
             hcount.append(nifti.shape[0])
             wcount.append(nifti.shape[1])
             dcount.append(nifti.shape[2])

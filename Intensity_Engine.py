@@ -1,7 +1,6 @@
 # Testing Intensity Normalization stuff
+# Richard Masson
 import nibabel as nib
-#from intensity_normalization.typing import Modality, TissueType
-#import matplotlib.pyplot as plt
 import NIFTI_Engine as ne
 from time import perf_counter
 import os
@@ -29,35 +28,7 @@ def RunTest():
 	for i in range(3):
 		normalized = normalize(data)
 	print("Done.")
-	'''
-	new_norm = nib.Nifti1Image(normalized, image.affine, image.header)
-	loc = "TestRobex/normed_image.nii"
-	print("Successfully normalized image. Saving to", loc)
-	nib.save(new_norm, loc)
-	'''
-	'''
-	thre = 80
-	inc = 3
-	dims = data.shape
-	cutoff = (int)(dims[1]/2)
-	print(data[thre:thre+inc,thre:thre+inc,thre:thre+inc])
-	print("Original elements are:", data[0][0][0].dtype)
-	print("Shape:", dims)
-	plt.imshow(data[:,cutoff,:], cmap='bone')
-	plt.savefig("norm_pre.png")
-	print("\n", normalized[thre:thre+inc,thre:thre+inc,thre:thre+inc])
-	print("Normalized elements are:", normalized[0][0][0].dtype)
-	print("Shape:", normalized.shape)
-	plt.imshow(normalized[:,cutoff,:], cmap='bone')
-	plt.savefig("norm_post.png")
 	
-	norm_self = ne.normalize(data)
-	print("\n", norm_self[thre:thre+inc,thre:thre+inc,thre:thre+inc])
-	print("Norm self elements are:", norm_self[0][0][0].dtype)
-	print("Shape:", norm_self.shape)
-	print("All done.")
-	'''
-
 def genNorms(root):
 	count = 0
 	fcm_norm = FCMNormalize()
@@ -76,19 +47,12 @@ def genNorms(root):
 									for filen in image_options:
 										if "NORMED" in filen:
 											norm_present = True
-											#print("Normalized file detected. Not writing new one.")
 									if norm_present == False:
-										#print("Saving a normalized image... ", end='')
 										image = nib.load(op.join(image_root, file))
 										data = image.get_fdata(dtype='float32')
-										#print("data shape:", data.shape, data.dtype)
 										normalized = fcm_norm(data)
-										#print("norm shape:", normalized.shape, normalized.dtype)
 										outfile = op.join(image_root, ("NORMED_"+file[9:]))
-										#nib.Nifti1Image(normalized, image.affine).to_filename(outfile)
-										#nib.save(normalized, outfile)
 										nib.Nifti1Image(normalized, image.affine).to_filename(outfile)
-										#print("Saved to", outfile)
 										count += 1
 	print("All done.")
 	print("Saved", count, "new normalized images.")

@@ -11,7 +11,6 @@ from tqdm import tqdm
 from time import sleep
 
 root = "/scratch/mssric004/ADNI_Data_NIFTI"
-#root = "/scratch/mssric004/ADNI_Test"
 print("ROOT:", root)
 testval = 2000
 count = 0
@@ -21,7 +20,6 @@ min_intensity = 5000
 max_intensity = -1
 maxsum = 0
 outlier = "na"
-#voxels = []
 class_dirs = os.listdir(root)
 
 def append_vals(dict, key, value):
@@ -52,7 +50,6 @@ for classes in class_dirs:
                             outlier = image_dir
                         if max > testval:
                             count += 1
-                            #exceptions.append(max)
                             exceptions = append_vals(exceptions, image_dir, max)
                         total += 1
                         '''
@@ -65,10 +62,3 @@ print("MIN VALUE:", min_intensity)
 print("MAX VALUE:", max_intensity, "- found at", outlier)
 print(count, "out of", total, "cases exceed", testval)
 print("Average max:", round(maxsum/total, 2))
-#print("98th percentile:", np.percentile(voxels, 98))
-#print("2nd percentile:", np.percentile(voxels, 2))
-'''
-print("Exceeding vals:\n")
-for key in exceptions:
-    print(key)
-'''

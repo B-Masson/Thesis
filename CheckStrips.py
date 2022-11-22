@@ -1,10 +1,10 @@
 # Check what's up with the skull stripping process
+# Richard Masson
 import os
 import os.path as op
 import re
 
 root = "/scratch/mssric004/ADNI_Data_NIFTI"
-#root = "/scratch/mssric004/ADNI_Data_NIFTI"
 stripped_images = 0
 total_images = 0
 red_flag = 0

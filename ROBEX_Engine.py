@@ -2,6 +2,7 @@
 # https://github.com/jcreinhold/intensity-normalization
 # https://github.com/jcreinhold/intensity-normalization/blob/master/tutorials/5min_tutorial.rst
 # https://www.nitrc.org/projects/robex
+# Richard Masson
 import nibabel as nib
 from pyrobex.robex import robex
 import os
